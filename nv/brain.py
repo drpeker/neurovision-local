@@ -129,8 +129,12 @@ class LocalBrain:
             if self._rec:
                 self._rec.session(Path(self._cfg["local"]["llm_model"]).name, self._cfg["local"]["system_prompt"])
             log.info("listening")
+            # The face shows "offline" (flat gray eyes) until this is set; Gemini Live set it on
+            # connect, here it means the local models are loaded and the robot is listening
+            self.body.connected_since = time.monotonic()
             await self._listen()
         finally:
+            self.body.connected_since = None
             speaker_task.cancel()
 
     async def _calibrate(self) -> None:
