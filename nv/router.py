@@ -122,6 +122,11 @@ def route(text: str) -> tuple[str, dict]:
             return "shutdown", {"target": "robot"}
 
     # --- vision (questions are allowed here) ---
+    # Whisper often drops "do" ("What you see at the moment?"); the LLM then got the question and
+    # made up a scene, so anything asking what the robot sees is a look
+    if re.search(r"\bwhat\b.*\b(you|u) (see|seeing)\b|\b(tell|show) me what you see\b|^look( around)?$"
+                 r"|\bwhat('s| is) (in front|around)\b", t):
+        return "look", {}
     if re.search(r"\bwhat (do|can) you see\b|\bwhat are you (looking at|seeing)\b|\blook around\b"
                  r"|\bwhat('s| is) (in front of you|around you|there|ahead)\b|\bdescribe (what you see|the room|your surroundings|it)\b"
                  r"|\bwhat('s| is) on the (camera|screen)\b", t):
@@ -173,7 +178,10 @@ def route(text: str) -> tuple[str, dict]:
                 direction = "sol"
             elif re.search(r"\bright\b", t) and not re.search(r"\bright (now|away)\b", t):
                 direction = "sag"
-        if not direction and (_order(t, r"go|move|drive|come|roll|head|forward|ahead|straight|onward")):
+        # "Come back" / "come here" said to a robot means "come to me": drive toward the user
+        if not direction and _order(t, r"come"):
+            direction = "ileri"
+        if not direction and (_order(t, r"go|move|drive|roll|head|forward|ahead|straight|onward")):
             if re.search(r"\b(back|backward|backwards|reverse)\b", t):
                 direction = "geri"
             elif re.search(r"\b(forward|forwards|ahead|straight|onward)\b", t):
