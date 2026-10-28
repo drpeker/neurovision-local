@@ -14,7 +14,7 @@ import re
 import time
 from pathlib import Path
 
-from .actions import Actions, you
+from .actions import Actions
 from .audio import FRAME_MS, Mic, Speaker
 from .body import Body
 from .camera import Camera
@@ -233,11 +233,14 @@ class LocalBrain:
             self.say(answer)
             return answer
         words = [w for w in re.findall(r"[a-z']{4,}", text.lower()) if w not in STOPWORDS]
-        notes = [you(t) for _, _, t in self._memory.recall(" ".join(words), limit=2)] if words else []
+        # Facts stay in the third person ("The user's name is Mustafa."): turned into "Your name
+        # is Mustafa." the model read "your" as itself and answered "My name is Mustafa."
+        facts = [t for _, _, t in self._memory.recall(" ".join(words), limit=2)] if words else []
+        notes = ["About the user: " + " ".join(facts)] if facts else []
         seen = self.actions.last_seen
         if seen and time.monotonic() - seen[0] < NOTES_MAX_AGE:
-            notes.append(seen[1])
-        prompt = text if not notes else "Notes: " + " ".join(notes) + f"\n\nUser: {text}"
+            notes.append("What you saw recently: " + seen[1])
+        prompt = text if not notes else "\n".join(notes) + f"\n\nUser: {text}"
         t0 = time.monotonic()
         first: list[float] = []
 
