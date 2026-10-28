@@ -256,8 +256,10 @@ class LocalBrain:
             answer = "Sorry, my thinking stopped for a moment."
             self.say(answer)
             return answer
-        log.info("LLM first sentence %.2f s, total %.2f s%s", first[0] if first else 0,
-                 time.monotonic() - t0, " (cut at token limit)" if cut else "")
+        tm = self._llm.timings
+        log.info("LLM first sentence %.2f s, total %.2f s%s; prompt %s new tokens in %.2f s", first[0] if first else 0,
+                 time.monotonic() - t0, " (cut at token limit)" if cut else "", tm.get("prompt_n", "?"),
+                 tm.get("prompt_ms", 0) / 1000)
         if not answer:
             answer = "I'm not sure what to say."
             self.say(answer)

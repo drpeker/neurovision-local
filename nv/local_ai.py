@@ -145,6 +145,10 @@ class LanguageModel:
         self._url = f"http://127.0.0.1:{cfg['llm_port']}/v1/chat/completions"
         self._system = system
         self._max_tokens = cfg["llm_max_tokens"]
+        # The last exchange (question as sent, answer, time) goes with the next question for this long
+        self._keep_s = cfg.get("llm_context_s", 0)
+        self._last: tuple[str, str, float] | None = None
+        self.timings: dict = {}
 
     def _post(self, messages: list[dict], max_tokens: int, stream: bool):
         data = {"messages": messages, "max_tokens": max_tokens, "stream": stream, "cache_prompt": True}
@@ -162,7 +166,11 @@ class LanguageModel:
     async def chat(self, text: str, on_sentence) -> tuple[str, bool]:
         """Returns (spoken answer, cut at the token limit). on_sentence(str) is called per sentence."""
         loop = asyncio.get_running_loop()
-        msgs = [{"role": "system", "content": self._system}, {"role": "user", "content": text}]
+        msgs = [{"role": "system", "content": self._system}]
+        if self._last and time.monotonic() - self._last[2] < self._keep_s:
+            # Sent exactly as last time, so llama-server reuses its cache for it
+            msgs += [{"role": "user", "content": self._last[0]}, {"role": "assistant", "content": self._last[1]}]
+        msgs.append({"role": "user", "content": text})
 
         def run() -> tuple[str, bool]:
             pending, spoken, finish = "", [], None
@@ -174,7 +182,11 @@ class LanguageModel:
                     payload = line[5:].strip()
                     if payload == "[DONE]":
                         break
-                    choice = json.loads(payload)["choices"][0]
+                    chunk = json.loads(payload)
+                    self.timings = chunk.get("timings") or self.timings
+                    if not chunk.get("choices"):
+                        continue
+                    choice = chunk["choices"][0]
                     finish = choice.get("finish_reason") or finish
                     pending += choice.get("delta", {}).get("content") or ""
                     parts = SENTENCE_END.split(pending)
@@ -189,7 +201,10 @@ class LanguageModel:
                 loop.call_soon_threadsafe(on_sentence, pending.strip())
             return " ".join(spoken), cut
 
-        return await asyncio.to_thread(run)
+        self.timings = {}
+        answer, cut = await asyncio.to_thread(run)
+        self._last = (text, answer, time.monotonic()) if answer else None
+        return answer, cut
 
 
 class TextToSpeech:

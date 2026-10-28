@@ -13,6 +13,8 @@ llm_threads = 4
 llm_port = 8180
 # ~3 tokens/s on a Pi 4: 60 tokens is about two short sentences
 llm_max_tokens = 60
+# Previous question and answer go with the next one for this long (s); 0 = off
+llm_context_s = 120
 whisper_server = "/home/drpeker/whisper.cpp/build/bin/whisper-server"
 # base Q5_0 (made with whisper-quantize): 88 % word match in the running app, 3.7 s per question;
 # tiny Q4_0 80 % / 1.9 s
