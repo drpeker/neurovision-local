@@ -1,0 +1,15 @@
+[Unit]
+Description=NeuroVision robot (Gemini Live)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/projects/neurovision-updated
+ExecStart=%h/projects/neurovision-updated/.venv/bin/python robot.py
+Restart=on-failure
+RestartSec=5
+# Log dosyasi zaten logs/robot.log; journal'a da duser
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

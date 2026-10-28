@@ -1,0 +1,13 @@
+# Wi-Fi kurulumu: kayitli aga baglanamazsa "NeuroVision-Kurulum" agi ve kurulum sayfasi.
+# Robot programindan bagimsiz; ag ayarlari icin root.
+[Unit]
+Description=NeuroVision Wi-Fi setup portal
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/drpeker/projects/neurovision-updated/deploy/wifi/wifi_portal.py
+
+[Install]
+WantedBy=multi-user.target

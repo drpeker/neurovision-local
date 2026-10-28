@@ -1,0 +1,16 @@
+# Acilis anonsu (3 ton + "Neuro-Vision / Booting.."). Robot programindan bagimsiz;
+# kullanici oturumundan (robot servisi orada) once calisir.
+[Unit]
+Description=NeuroVision boot chime and screen
+After=sound.target local-fs.target
+Before=user@1000.service
+
+[Service]
+Type=oneshot
+User=drpeker
+Environment=HOME=/home/drpeker
+ExecStart=/home/drpeker/projects/neurovision-updated/.venv/bin/python /home/drpeker/projects/neurovision-updated/deploy/boot/boot_splash.py
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

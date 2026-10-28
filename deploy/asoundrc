@@ -1,0 +1,51 @@
+# NeuroVision ses: googlevoicehat-soundcard (INMP441 mikrofon + MAX98357A amfi, tek I2S karti)
+# Mikrofon ve hoparlor ayni I2S saatini paylasir: ikisi de 48 kHz S32 stereo'ya sabit.
+
+# --- mikrofon: hw (2 kanal S32) -> dsnoop (paylasimli) -> sol kanal -> yazilim kazanci -> plug
+pcm.inmp441_snoop {
+    type dsnoop
+    ipc_key 441441
+    ipc_perm 0666
+    slave {
+        pcm "hw:sndrpigooglevoi,0"
+        channels 2
+        format S32_LE
+        rate 48000
+        period_size 960
+        buffer_size 3840
+    }
+}
+
+# INMP441 L/R pini GND'de oldugu icin ses sol kanalda
+pcm.inmp441_left {
+    type route
+    slave { pcm "inmp441_snoop"; channels 2 }
+    ttable.0.0 1
+}
+
+pcm.inmp441_boost {
+    type softvol
+    slave.pcm "inmp441_left"
+    control { name "Mic Boost"; card sndrpigooglevoi }
+    min_dB -10.0
+    max_dB 30.0
+    resolution 41
+}
+
+pcm.mic {
+    type plug
+    slave.pcm "inmp441_boost"
+    hint { show on; description "NeuroVision INMP441 mic" }
+}
+
+# --- hoparlor: MAX98357A, hiz/format mikrofonla ayni (48 kHz S32) olmali
+pcm.speaker {
+    type plug
+    slave {
+        pcm "hw:sndrpigooglevoi,0"
+        rate 48000
+        format S32_LE
+        channels 2
+    }
+    hint { show on; description "NeuroVision MAX98357A hoparlor" }
+}
