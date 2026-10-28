@@ -1,4 +1,4 @@
-"""Local AI services: Qwen (llama-server), Whisper (whisper-server) and Piper, all on the Pi.
+"""Local AI services: Qwen (llama-server), Parakeet (nv/parakeet_server.py) and Piper, all on the Pi.
 
 The two servers run as child processes and are stopped with the robot. Settings live in
 config.toml [local]; numbers in comments were measured on a Pi 4 (4 GB, Cortex-A72).
@@ -10,7 +10,9 @@ import json
 import logging
 import re
 import subprocess
+import sys
 import time
+import unicodedata
 import urllib.request
 import uuid
 import wave
@@ -26,7 +28,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 class Servers:
-    """Starts llama-server and whisper-server; both load while the robot opens its hardware."""
+    """Starts llama-server and the Parakeet server; both load while the robot opens its hardware."""
 
     def __init__(self, cfg: dict, log_dir: Path):
         self._cfg = cfg
@@ -47,20 +49,20 @@ class Servers:
             "-np", "1", "--host", "127.0.0.1", "--port", str(c["llm_port"]),
         ])
         self._spawn("stt", [
-            c["whisper_server"], "-m", c["stt_model"], "-l", c["language"],
-            "-t", str(c["stt_threads"]), "-nt",
-            # Greedy decoding and a ~10 s window: 3x faster than beam 3 + 30 s, no accuracy loss
-            "-bs", "1", "-bo", "1", "-ac", "512",
-            "--vad", "-vm", c["stt_vad_model"], "-vt", "0.50", "-vsd", "500",
-            "--host", "127.0.0.1", "--port", str(c["stt_port"]),
-        ])
+            # Parakeet answers like whisper-server (same /inference, same fields); it needs no VAD
+            # pass of its own: SpeechGate already cut the speech out
+            sys.executable, "-m", "nv.parakeet_server", "--lib", c["parakeet_lib"], "--model", c["stt_model"],
+            "--threads", str(c["stt_threads"]), "--port", str(c["stt_port"]),
+        ], need=(c["parakeet_lib"], c["stt_model"]))
 
-    def _spawn(self, name: str, args: list[str]) -> None:
-        if not Path(args[0]).exists() or not Path(args[2]).exists():
-            raise FileNotFoundError(f"{name}: {args[0]} or {args[2]} is missing (see config.toml [local])")
+    def _spawn(self, name: str, args: list[str], need: tuple[str, ...] = ()) -> None:
+        for path in need or (args[0], args[2]):
+            if not Path(path).exists():
+                raise FileNotFoundError(f"{name}: {path} is missing (see config.toml [local])")
         out = open(self._log_dir / f"{name}-server.log", "w")
-        self._procs.append(subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT))
-        log.info("%s server starting: %s", name, Path(args[2]).name)
+        self._procs.append(subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT,
+                                            cwd=Path(__file__).resolve().parent.parent))
+        log.info("%s server starting: %s", name, Path(need[-1] if need else args[2]).name)
 
     async def wait_ready(self, which: tuple[str, ...] = ("STT", "LLM"), timeout: float = 120) -> None:
         c = self._cfg
@@ -92,11 +94,12 @@ class Servers:
 
 
 class SpeechToText:
-    """Whisper over HTTP, audio sent from memory. Returns (text, confidence).
+    """Parakeet over HTTP (whisper-server's interface), audio sent from memory. Returns (text, confidence).
 
-    confidence is the lowest segment avg_logprob: ~0 is certain; below about -0.5 words are
-    often guessed. No prompt on purpose: a prompt full of commands made Whisper turn unclear
-    speech into those commands and sometimes repeat it in a loop for 6-11 s.
+    confidence is the lowest segment mean token log-probability: ~0 is certain. On the robot
+    microphone correct English sentences scored -0.00 to -0.22, a misheard "Stop." -0.68.
+    Parakeet v3 picks the language itself; a sentence it writes in another script (Cyrillic)
+    was misheard, so it gets the lowest confidence and the robot asks again.
     """
 
     def __init__(self, cfg: dict):
@@ -126,11 +129,14 @@ class SpeechToText:
         with urllib.request.urlopen(req, timeout=30) as r:
             result = json.load(r)
         scores = [s.get("avg_logprob", 0.0) for s in result.get("segments", [])]
-        return dedupe(result.get("text", "").strip()), min(scores, default=0.0)
+        text = dedupe(result.get("text", "").strip())
+        if any(c.isalpha() and not c.isascii() and "LATIN" not in unicodedata.name(c, "") for c in text):
+            return text, -9.0
+        return text, min(scores, default=0.0)
 
 
 def dedupe(text: str) -> str:
-    """Whisper sometimes repeats a sentence ("Is it on? Is it on? Is it on?"): keep one."""
+    """A recogniser sometimes repeats a sentence ("Is it on? Is it on? Is it on?"): keep one."""
     out: list[str] = []
     for sentence in SENTENCE_END.split(text):
         if not out or sentence.lower().strip(" .!?") != out[-1].lower().strip(" .!?"):

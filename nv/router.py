@@ -181,10 +181,10 @@ def route(text: str) -> tuple[str, dict]:
         # "Come back" / "come here" said to a robot means "come to me": drive toward the user
         if not direction and _order(t, r"come"):
             direction = "ileri"
-        if not direction and (_order(t, r"go|move|drive|roll|head|forward|ahead|straight|onward")):
-            if re.search(r"\b(back|backward|backwards|reverse)\b", t):
+        if not direction and (_order(t, r"go|move|drive|roll|head|walk|step|advance|forward|ahead|straight|onward")):
+            if re.search(r"\b(back|backward|backwards|reverse|rear)\b", t):
                 direction = "geri"
-            elif re.search(r"\b(forward|forwards|ahead|straight|onward)\b", t):
+            elif re.search(r"\b(forward|forwards|ahead|straight|onward)\b|\bto the front\b", t):
                 direction = "ileri"
         if not direction and _order(t, r"back up|back off|reverse|go back|move back|backward|backwards"):
             direction = "geri"

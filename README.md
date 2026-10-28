@@ -6,7 +6,7 @@ Gemini Live with three local models:
 
 | Job | NeuroVision | NeuroVision local |
 |---|---|---|
-| Hearing | Gemini Live | **Whisper base Q5_0** (whisper.cpp) |
+| Hearing | Gemini Live | **NVIDIA Parakeet TDT 0.6B v3** (q4_k, whisper.cpp's `libparakeet`) |
 | Thinking, chat | Gemini Live | **Qwen3 1.7B Q4_K_M** (llama.cpp) |
 | Robot commands | Gemini function calls | **keyword router** (`nv/router.py`) → NeuroVision's own modules |
 | Speaking | Gemini voice | **Piper** `en_US-lessac-medium` |
@@ -22,7 +22,7 @@ about 2 GB of RAM, more than a Zero 2W has.
 ```mermaid
 flowchart LR
     MIC[INMP441 / USB mic] --> GATE[SpeechGate<br/>webrtcvad, room-noise threshold]
-    GATE -->|one utterance| STT[Whisper base<br/>text + confidence]
+    GATE -->|one utterance| STT[Parakeet v3<br/>text + confidence]
     STT --> R{router}
     R -->|stop, move, follow, look,<br/>volume, remember, weather...| ACT[actions.py<br/>motors, tracker, camera,<br/>memory, body, face]
     R -->|anything else| LLM[Qwen3 1.7B<br/>streams sentences]
@@ -36,14 +36,17 @@ Measured with Qwen3 1.7B on a Pi 4, letting the LLM choose tools took **7–13 s
 the right tool 9 times out of 12. The router understands a command instantly, so a command costs only speech
 recognition. The LLM only chats; it gets no tool list, which also made its answers better.
 
-- **Confidence check.** Whisper's `avg_logprob` comes with every utterance. Commands that change something (move, follow, remember,
-  volume...) need ≥ −0.75, shutdown and forget ≥ −0.6, chat ≥ −0.6; otherwise the robot asks again instead of acting on a guess.
+- **Confidence check.** Every utterance comes with Parakeet's mean token log-probability. Commands that change something
+  (move, follow, remember, volume...) need ≥ −0.5, shutdown and forget ≥ −0.35, chat ≥ −0.6; otherwise the robot asks
+  again instead of acting on a guess. Parakeet picks the language itself; text in another script (Cyrillic) is asked again.
   "Stop" is never blocked. Short mishearings of it ("Top!", "Shop") also stop the robot, because stopping is always safe.
 - **Half duplex**, as in NeuroVision: while the robot speaks or its motors run, the microphone is ignored.
 - **Notes for the LLM.** Up to two memories matching the question's content words, and what the robot saw in the last
   two minutes, are added to the question. The whole memory list is not added: every 8 tokens cost about 1 s on the Pi 4.
+- **Previous exchange.** The last question and answer go with the next chat question for 120 s (`llm_context_s`),
+  so follow-ups ("How much does it weigh?") know what they refer to. It costs +1 to +3 s before the first sentence.
 - **Streaming.** Qwen's answer is spoken sentence by sentence; Piper prepares the next sentence while the speaker plays.
-- **Servers.** `robot.py` starts `llama-server` (port 8180) and `whisper-server` (8181) while it opens the hardware, and stops them on exit.
+- **Servers.** `robot.py` starts `llama-server` (port 8180) and `nv/parakeet_server.py` (8181) while it opens the hardware, and stops them on exit.
   The ports differ from NeuroBrain's, so neither kills the other's servers.
 
 ## What you can say
@@ -71,11 +74,12 @@ recognition. The LLM only chats; it gets no tool list, which also made its answe
 | | |
 |---|---|
 | Power-on to "I'm ready." (commands) / chat ready | ~33 s / ~77 s on the robot (cold SD card) |
-| Command, from end of speech to the robot's answer | **~4 s** (3.7–4 s of it is Whisper) |
+| Command, from end of speech to the robot's answer | **~2 s** (Parakeet ~1.7 s; Whisper base took ~4 s) |
 | Chat, first spoken sentence | 3.5–9 s after recognition; whole turn 7–15 s |
-| Router accuracy (66 test sentences, `tests/test_router.py`) | 66/66 |
+| Router accuracy (`tests/test_router.py`) | 78/78 |
 | Voice test (`tests/e2e_voice.py`, 14 questions) | 14/14 heard; 12 answered right; "bowl" heard as "ball" once; a one-word "Stop." heard as "Don't!" was asked again |
-| RAM | ~2.0 GB: Qwen 1.55 GB, robot 0.27 GB, Whisper 0.13 GB |
+| Speech recognition (20 English sentences through the robot's mic) | Parakeet v3: 93 % words, 17/20 exact, 1.65 s; Whisper base Q5_0: 69 %, 5/20, 3.6 s |
+| RAM | ~2.3 GB: Qwen 1.55 GB, Parakeet 0.47 GB, robot 0.27 GB |
 
 ## Setup
 
@@ -84,8 +88,8 @@ The models and binaries are the ones NeuroBrain uses on this Pi (paths in `confi
 ```bash
 # llama.cpp and whisper.cpp built in ~/neurobrain/llama.cpp and ~/whisper.cpp
 # Qwen3 1.7B Q4_K_M:  ~/neurobrain/models/qwen3-1.7b-q4km.gguf
-# Whisper base Q5_0 (made locally from ggml-base.bin):
-cd ~/whisper.cpp/models && ../build/bin/whisper-quantize ggml-base.bin ggml-base-q5_0.bin q5_0
+# Parakeet v3 q4_k (whisper.cpp builds libparakeet.so):
+cd ~/whisper.cpp/models && curl -LO https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q4_k.bin
 # Piper voice: ~/neurobrain/tts/en_US-lessac-medium.onnx (+ .json)
 
 cd ~/projects/neurovision-local
@@ -105,7 +109,7 @@ sudo bash deploy/setup-pi4.sh         # I2S card, SPI, camera, poweroff rule, bo
 sudo reboot
 ```
 
-After power-on the robot says "I'm ready." and takes commands after ~33 s (Whisper loads in ~12 s); chat follows
+After power-on the robot says "I'm ready." and takes commands after ~33 s (Parakeet loads in ~10 s); chat follows
 about 45 s later, when Qwen has loaded from the SD card (~36 s) and cached its prompt. Until then it says it is still
 waking up.
 
@@ -138,7 +142,8 @@ Logs: `logs/robot.log`, `logs/llm-server.log`, `logs/stt-server.log`; the last 1
 | `nv/brain.py` | **new** – listen → recognise → route → act or chat → speak (replaces `live.py`) |
 | `nv/router.py` | **new** – English commands → NeuroVision tools |
 | `nv/actions.py` | **new** – runs the tools, writes the spoken English answers (replaces `tools.py`) |
-| `nv/local_ai.py` | **new** – llama-server / whisper-server processes, Whisper client, Qwen streaming, Piper |
+| `nv/local_ai.py` | **new** – llama-server / Parakeet server processes, speech client, Qwen streaming, Piper |
+| `nv/parakeet_server.py` | **new** – Parakeet behind a whisper-server compatible HTTP API (ctypes, `libparakeet.so`) |
 | `nv/camera.py` | NeuroVision + `backend = "v4l2"` for a USB camera (same MJPEG stream through ffmpeg) |
 | `nv/tracker.py` | NeuroVision; tracking events are spoken English sentences |
 | `nv/web.py` | NeuroVision; English place names, weather words and Wikipedia |
@@ -149,7 +154,7 @@ Logs: `logs/robot.log`, `logs/llm-server.log`, `logs/stt-server.log`; the last 1
 
 - Qwen3 1.7B produces ~3 tokens/s on the Pi 4, so chat answers take a few seconds and are kept to two short sentences.
   It can invent facts; the confidence check keeps the worst misheard questions away from it.
-- Whisper base still mishears names ("Izmir" → "his mirror") and short words.
+- One-word commands are the hardest: "Stop." was heard as "So" (low confidence, so the robot asks again).
 - `look` names only the 80 COCO object classes plus colours; it cannot describe a scene. A vision LLM (Qwen3.5 2B)
   took 25–37 s per frame on the Pi 4.
 - No automatic memory summaries yet (Gemini Flash-Lite did that); facts are saved when you ask.
