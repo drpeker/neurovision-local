@@ -21,15 +21,19 @@ stt_vad_model = "/home/drpeker/whisper.cpp/models/for-tests-silero-v6.2.0-ggml.b
 stt_threads = 4
 stt_port = 8181
 voice = "/home/drpeker/neurobrain/tts/en_US-lessac-medium.onnx"
-# Whisper confidence (avg_logprob) needed to act: commands that change something / chat
-min_command_logprob = -0.5
+# Whisper confidence (avg_logprob) needed to act. On the robot's INMP441 correct commands scored
+# -0.26 to -0.72 ("Follow me!" -0.58 was refused at -0.5); misheard ones -0.78 to -0.92
+min_command_logprob = -0.75
+# Not undoable (shutdown, forget): stricter
+min_risky_logprob = -0.6
 min_chat_logprob = -0.6
 # Weather when no place is said and none is remembered ("I live in ..."); empty: the robot asks
 home_city = ""
 # Kept short: Qwen 1.7B follows a few plain lines better than many rules. Robot commands
-# never reach the LLM (nv/router.py), so it needs no tool descriptions.
+# never reach the LLM (nv/router.py), so it needs no tool descriptions. Only the name: with
+# "You are a small home robot." it answered "I can't know things like capital cities".
 system_prompt = """
-Your name is NeuroVision. You are a small home robot.
+Your name is NeuroVision.
 Always speak English.
 Answer briefly, naturally, and accurately.
 Use one or two short sentences whenever possible.

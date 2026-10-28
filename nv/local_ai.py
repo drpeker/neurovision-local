@@ -62,10 +62,10 @@ class Servers:
         self._procs.append(subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT))
         log.info("%s server starting: %s", name, Path(args[2]).name)
 
-    async def wait_ready(self, timeout: float = 120) -> None:
+    async def wait_ready(self, which: tuple[str, ...] = ("STT", "LLM"), timeout: float = 120) -> None:
         c = self._cfg
-        for name, url in (("STT", f"http://127.0.0.1:{c['stt_port']}/"),
-                          ("LLM", f"http://127.0.0.1:{c['llm_port']}/health")):
+        urls = {"STT": f"http://127.0.0.1:{c['stt_port']}/", "LLM": f"http://127.0.0.1:{c['llm_port']}/health"}
+        for name, url in ((n, urls[n]) for n in which):
             deadline = time.monotonic() + timeout
             while True:
                 if any(p.poll() is not None for p in self._procs):

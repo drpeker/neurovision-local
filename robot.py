@@ -114,10 +114,12 @@ async def run(cfg: dict) -> None:
         face = await make_face(cfg, speaker, brain)
         motors = make_motors(cfg, brain, memory)
         tracker = make_vision(cfg, camera, motors, brain, face)
-        await servers.wait_ready()
-        log.info("models loaded in %.1f s", time.monotonic() - started)
+        # Commands need only Whisper (~12 s); Qwen takes ~36 s to load from the SD card and is
+        # only needed for chat, so the robot starts listening without waiting for it
+        await servers.wait_ready(("STT",))
+        log.info("speech recognition loaded in %.1f s", time.monotonic() - started)
 
-        task = asyncio.create_task(brain.run(), name="brain")
+        task = asyncio.create_task(brain.run(servers.wait_ready(("LLM",))), name="brain")
         stop_target = []
 
         def on_shutdown(target: str) -> None:

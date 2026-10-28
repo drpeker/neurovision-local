@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 # Whisper avg_logprob below these: the words were probably guessed (measured on the C270 and
 # a speaker test set). Commands that change something are not run on a guess; chat asks again.
 GUARDED = {"move", "track", "turn_to", "remember", "forget", "volume", "motor_speed", "shutdown", "express"}
+# Not undoable: these need the stricter min_risky_logprob
+RISKY = {"shutdown", "forget"}
 NOTES_MAX_AGE = 120  # s; what the robot last saw is given to the LLM for this long
 # Memory search (nv/memory.py) was written for Turkish: English filler words matched every
 # fact ("the" -> any fact with "the"), so a joke request got a note about the user's keys
@@ -57,6 +59,8 @@ class LocalBrain:
         self._llm = LanguageModel(local, local["system_prompt"].strip())
         self._tts = TextToSpeech(local["voice"])
         self._min_command, self._min_chat = local["min_command_logprob"], local["min_chat_logprob"]
+        self._min_risky = local["min_risky_logprob"]
+        self._llm_ready = False
         self.face = None
         self.motors = None
         self._sentences: asyncio.Queue[str] = asyncio.Queue()
@@ -120,22 +124,32 @@ class LocalBrain:
             or bool(self.motors and self.motors.busy)
 
     # --- main loop ---
-    async def run(self) -> None:
+    async def run(self, llm_loading) -> None:
+        """llm_loading: awaitable that finishes when the Qwen server is up (it loads meanwhile)."""
         speaker_task = asyncio.create_task(self._speak_worker(), name="speech")
+        llm_task = asyncio.create_task(self._start_llm(llm_loading), name="llm")
         try:
             await self._calibrate()
-            t = await self._llm.warm_up()
-            log.info("system prompt cached in %.1f s", t)
             if self._rec:
                 self._rec.session(Path(self._cfg["local"]["llm_model"]).name, self._cfg["local"]["system_prompt"])
-            log.info("listening")
+            log.info("listening (commands now, chat when the language model is loaded)")
             # The face shows "offline" (flat gray eyes) until this is set; Gemini Live set it on
-            # connect, here it means the local models are loaded and the robot is listening
+            # connect, here it means speech recognition is loaded and the robot is listening
             self.body.connected_since = time.monotonic()
+            self.say("I'm ready.")
             await self._listen()
         finally:
             self.body.connected_since = None
+            llm_task.cancel()
             speaker_task.cancel()
+
+    async def _start_llm(self, loading) -> None:
+        t0 = time.monotonic()
+        await loading
+        t = await self._llm.warm_up()
+        self._llm_ready = True
+        log.info("language model ready %.1f s after listening started (system prompt cached in %.1f s)",
+                 time.monotonic() - t0, t)
 
     async def _calibrate(self) -> None:
         """Measure room noise at start; speech must be clearly above it (same as NeuroVision)."""
@@ -195,7 +209,7 @@ class LocalBrain:
         log.info("heard %r (%.1f s audio, %.2f s, confidence %.2f) -> %s %s",
                  text, len(pcm) / 32000, heard_s, confidence, tool, args or "")
 
-        if tool in GUARDED and confidence < self._min_command:
+        if tool in RISKY and confidence < self._min_risky or tool in GUARDED and confidence < self._min_command:
             answer = "Sorry, I'm not sure I heard that right. Please say it again."
         elif tool == "chat" and confidence < self._min_chat:
             answer = "Sorry, I didn't catch that. Could you say it again?"
@@ -214,6 +228,10 @@ class LocalBrain:
 
     async def _chat(self, text: str) -> str:
         """Qwen answers; a few notes (matching memories, what it just saw) go with the question."""
+        if not self._llm_ready:
+            answer = "I'm still waking up. I can already move, look and follow, but I can't chat yet."
+            self.say(answer)
+            return answer
         words = [w for w in re.findall(r"[a-z']{4,}", text.lower()) if w not in STOPWORDS]
         notes = [you(t) for _, _, t in self._memory.recall(" ".join(words), limit=2)] if words else []
         seen = self.actions.last_seen

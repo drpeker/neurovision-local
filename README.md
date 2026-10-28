@@ -37,7 +37,7 @@ the right tool 9 times out of 12. The router understands a command instantly, so
 recognition. The LLM only chats; it gets no tool list, which also made its answers better.
 
 - **Confidence check.** Whisper's `avg_logprob` comes with every utterance. Commands that change something (move, follow, remember,
-  volume, shutdown...) need ≥ −0.5, chat needs ≥ −0.6; otherwise the robot asks again instead of acting on a guess.
+  volume...) need ≥ −0.75, shutdown and forget ≥ −0.6, chat ≥ −0.6; otherwise the robot asks again instead of acting on a guess.
   "Stop" is never blocked. Short mishearings of it ("Top!", "Shop") also stop the robot, because stopping is always safe.
 - **Half duplex**, as in NeuroVision: while the robot speaks or its motors run, the microphone is ignored.
 - **Notes for the LLM.** Up to two memories matching the question's content words, and what the robot saw in the last
@@ -70,7 +70,7 @@ recognition. The LLM only chats; it gets no tool list, which also made its answe
 
 | | |
 |---|---|
-| Start to listening | ~17 s (models load while the hardware opens; system prompt cached in ~6.5 s) |
+| Power-on to "I'm ready." (commands) / chat ready | ~33 s / ~77 s on the robot (cold SD card) |
 | Command, from end of speech to the robot's answer | **~4 s** (3.7–4 s of it is Whisper) |
 | Chat, first spoken sentence | 3.5–9 s after recognition; whole turn 7–15 s |
 | Router accuracy (66 test sentences, `tests/test_router.py`) | 66/66 |
@@ -105,7 +105,9 @@ sudo bash deploy/setup-pi4.sh         # I2S card, SPI, camera, poweroff rule, bo
 sudo reboot
 ```
 
-After a reboot the robot is listening about one minute later (models load in ~36 s from a cold SD card).
+After power-on the robot says "I'm ready." and takes commands after ~33 s (Whisper loads in ~12 s); chat follows
+about 45 s later, when Qwen has loaded from the SD card (~36 s) and cached its prompt. Until then it says it is still
+waking up.
 
 ## Running
 
