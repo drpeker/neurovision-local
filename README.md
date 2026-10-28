@@ -94,9 +94,18 @@ uv pip install --python .venv/bin/python -r requirements.txt
 bash deploy/get-model.sh                                         # YOLO11n -> models/yolo11n_320.onnx
 ```
 
-Robot hardware: as in NeuroVision (`deploy/hw-setup.sh`, `deploy/asoundrc`, `deploy/boot-config.txt`). On this Pi 4,
-`/boot/firmware/config.txt.neurovision` holds the robot audio settings; the current `config.txt` is set up for NeuroBrain
-(C270 and headphone output).
+Robot hardware (Pi camera, INMP441 + MAX98357A on I2S, ST7789 on SPI, MX1508): same pins and settings as the Zero 2W.
+To make a Pi 4 the robot (checked against the Zero on 2026-10-28: same code, `config.toml`, `~/.asoundrc`, services and
+`config.txt` lines):
+
+```bash
+cp deploy/asoundrc ~/.asoundrc
+bash deploy/install-service.sh        # user service neurovision-local, starts at boot
+sudo bash deploy/setup-pi4.sh         # I2S card, SPI, camera, poweroff rule, boot chime, Wi-Fi portal, linger
+sudo reboot
+```
+
+After a reboot the robot is listening about one minute later (models load in ~36 s from a cold SD card).
 
 ## Running
 
