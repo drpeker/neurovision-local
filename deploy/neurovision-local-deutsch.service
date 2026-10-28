@@ -1,0 +1,16 @@
+[Unit]
+Description=NeuroVision local, German (on-device Qwen, Parakeet, Piper)
+Conflicts=neurovision.service neurovision-local.service
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/projects/neurovision-local-deutsch
+ExecStart=%h/projects/neurovision-local-deutsch/.venv/bin/python robot.py
+Restart=on-failure
+RestartSec=5
+# Log dosyasi zaten logs/robot.log; journal'a da duser
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

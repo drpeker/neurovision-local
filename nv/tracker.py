@@ -12,11 +12,8 @@ import asyncio
 import logging
 import time
 
+from .german import phrase
 from .vision import COCO80, COLORED, COLORS, Detection, Detector, turkish
-
-# Spoken (English) colour names for the local brain's events
-COLOR_EN = {"kırmızı": "red", "turuncu": "orange", "sarı": "yellow", "yeşil": "green", "mavi": "blue",
-            "mor": "purple", "pembe": "pink", "kahverengi": "brown", "siyah": "black", "beyaz": "white", "gri": "gray"}
 
 log = logging.getLogger(__name__)
 
@@ -71,12 +68,10 @@ class Tracker:
         return f"{self.color} {turkish(self.target)}" if self.color else turkish(self.target)
 
     def _spoken(self) -> str:
-        """English name for the local brain's spoken events: 'you', 'the red cup'."""
+        """German name (accusative) for the local brain's spoken events: 'dich', 'die rote Tasse'."""
         if self.target == "person":
-            return "you"
-        color = COLOR_EN.get(self.color, "")
-        thing = "object" if self.target == COLORED else self.target
-        return f"the {color} {thing}".replace("  ", " ")
+            return "dich"
+        return phrase(self.target, self.color, "acc", "def")
 
     def status(self) -> dict:
         seen = [f"{'/'.join(d.colors[:2])} {turkish(d.name)} {d.conf:.0%}".strip()
@@ -194,7 +189,7 @@ class Tracker:
                 jpeg = await self._frame_after(settled)
                 if not jpeg:
                     log.warning("takip: kamera karesi yok")
-                    await self._say("I stopped following: my camera is not giving me a picture.")
+                    await self._say("Ich folge nicht mehr: Meine Kamera liefert kein Bild.")
                     return
                 found = (await self._detector.find_color(jpeg, self.color) if target == COLORED
                          else await self._detector.detect(jpeg))
@@ -210,11 +205,11 @@ class Tracker:
                         log.warning("takip durdu: motorlar donmuyor (batarya/koruma/sikisma?)")
                         check = await self._motors.signal_check()
                         if check["pwm_sinyali"] == "var":
-                            await self._say("I stopped following: my motors get power signals but I can't "
-                                            "turn. Please check the motor battery.")
+                            await self._say("Ich folge nicht mehr: Meine Motoren bekommen Signale, aber ich "
+                                            "drehe mich nicht. Bitte prüfe den Motorakku.")
                         else:
-                            await self._say("I stopped following: no signal reaches my motor pins. "
-                                            "I may need a restart.")
+                            await self._say("Ich folge nicht mehr: An meinen Motorpins kommt kein Signal an. "
+                                            "Vielleicht muss ich neu starten.")
                         return
                 now = time.monotonic()
                 if hit:
@@ -229,9 +224,9 @@ class Tracker:
                         self.face.gaze(e)
                     if not announced:
                         announced = True
-                        await self._say(f"I see {name}.")
+                        await self._say(f"Ich sehe {name}.")
                     elif lost:
-                        await self._say(f"Found {name} again.")
+                        await self._say(f"Ich habe {name} wiedergefunden.")
                     lost = False
                     if abs(e) > c["center_tolerance"]:
                         turned = (e, await self.turn_toward(e))
@@ -248,11 +243,11 @@ class Tracker:
                     continue
                 if searched >= c["search_steps"]:
                     log.info("takip: %s bulunamadi, birakildi", target)
-                    await self._say(f"I couldn't find {name}, so I stopped following.")
+                    await self._say(f"Ich habe {name} nicht gefunden und höre auf zu folgen.")
                     return
                 if searched == 0 and announced:
                     lost = True
-                    await self._say(f"I lost {name}. Looking around.")
+                    await self._say(f"Ich habe {name} verloren. Ich schaue mich um.")
                 searched += 1
                 duty = c["search_duty"]
                 # Aramada takilma kontrolu yok: hedef cikinca kamera cogu zaman duz duvara bakar,
@@ -263,7 +258,7 @@ class Tracker:
                 settled = await self._settle()
                 await asyncio.sleep(c["listen_s"])
             log.info("takip suresi doldu: %s", target)
-            await self._say("I stopped following; time is up.")
+            await self._say("Ich folge nicht mehr, die Zeit ist um.")
         finally:
             if self.face:
                 self.face.gaze(None)

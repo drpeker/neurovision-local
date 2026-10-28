@@ -10,12 +10,13 @@ from piper import PiperVoice
 ROOT = Path(__file__).resolve().parent.parent
 LOG = Path("/tmp/nvl_e2e.log")
 QUESTIONS = sys.argv[2].split("|") if len(sys.argv) > 2 else [
-    "What is your name?", "What do you see?", "Turn left.", "Set the volume to 80.", "What time is it?",
-    "Remember that my keys are in the blue bowl.", "Where are my keys?", "How hot are you?",
-    "What is the capital of Finland?", "Tell me a joke.", "Who was Albert Einstein?",
-    "What's the weather in Ankara?", "Follow me.", "Stop."]
+    "Wie heißt du?", "Was siehst du?", "Dreh dich nach links.", "Stell die Lautstärke auf achtzig.",
+    "Wie spät ist es?", "Merk dir, dass meine Schlüssel in der blauen Schale sind.", "Wo sind meine Schlüssel?",
+    "Wie warm bist du?", "Was ist die Hauptstadt von Finnland?", "Erzähl mir einen Witz.",
+    "Wer war Albert Einstein?", "Wie ist das Wetter in Berlin?", "Folge mir.", "Stopp."]
 
-voice = PiperVoice.load("/home/drpeker/neurobrain/tts/en_US-lessac-medium.onnx")
+# A different (male) voice from the robot's own, so the test is not the voice hearing itself
+voice = PiperVoice.load("/home/drpeker/neurobrain/tts/de/de_DE-thorsten-medium.onnx")
 for i, q in enumerate(QUESTIONS):
     with wave.open(f"/tmp/nvl_q{i}.wav", "wb") as w:
         voice.synthesize_wav(q, w)

@@ -1,156 +1,164 @@
-# NeuroVision local
+# NeuroVision local – Deutsch
 
-The NeuroVision tracked robot with its brain on the Raspberry Pi: no cloud, no API key.
-It starts from the latest NeuroVision (`neurovision-gemini` `a933eb1`, the version running on the Zero 2W) and replaces
-Gemini Live with three local models:
+Der NeuroVision-Kettenroboter mit seinem Gehirn auf dem Raspberry Pi 4, **komplett auf Deutsch**: er versteht Deutsch,
+spricht Deutsch (Frauenstimme) und schreibt Deutsch auf sein Display. Keine Cloud, kein API-Schlüssel.
 
-| Job | NeuroVision | NeuroVision local |
+Dieser Zweig (`deutsch`) ist eine Kopie der englischen Version (`main`, Tag `stable-2026-10-28b`); die englische Version
+bleibt unverändert. Auf dem Pi liegen beide nebeneinander: `~/projects/neurovision-local` (Englisch) und
+`~/projects/neurovision-local-deutsch` (Deutsch).
+
+| Aufgabe | Englische Version | Deutsche Version |
 |---|---|---|
-| Hearing | Gemini Live | **Whisper base Q5_0** (whisper.cpp) |
-| Thinking, chat | Gemini Live | **Qwen3 1.7B Q4_K_M** (llama.cpp) |
-| Robot commands | Gemini function calls | **keyword router** (`nv/router.py`) → NeuroVision's own modules |
-| Speaking | Gemini voice | **Piper** `en_US-lessac-medium` |
-| Seeing (`look`) | camera frame to Gemini | **YOLO11n** (NeuroVision's tracker model) → spoken object list |
-| Language | Turkish | English |
+| Hören | Whisper base Q5_0 | **NVIDIA Parakeet TDT 0.6B v3** (q4_k, `libparakeet` aus whisper.cpp) |
+| Denken, Plaudern | Qwen3 1.7B Q4_K_M | **Qwen3 1.7B Q4_K_M**, deutscher System-Prompt |
+| Roboterbefehle | englischer Wort-Router | **deutscher Wort-Router** (`nv/router.py`, auch „Sie“-Form) |
+| Sprechen | Piper `en_US-lessac-medium` | **Piper `de_DE-kerstin-low`** (offizielle Piper-Frauenstimme) |
+| Sehen (`look`) | YOLO11n → englische Liste | YOLO11n → deutsche Sätze mit Artikel und Fall („eine rote Tasse links“) |
+| Wetter, Wikipedia | Englisch | Open-Meteo auf Deutsch, deutsche Wikipedia |
 
-The hardware side is NeuroVision unchanged: same pins, same drivers and tuning (INMP441 mic, MAX98357A amp,
-ST7789 face, MX1508 tracks, Pi camera, tracking, Wi-Fi portal, boot splash). Runs on a **Pi 4 (4 GB)**; the models need
-about 2 GB of RAM, more than a Zero 2W has.
+Die Hardware ist unverändert NeuroVision: gleiche Pins, Treiber und Einstellungen (INMP441, MAX98357A, ST7789,
+MX1508, Pi-Kamera, Tracking, WLAN-Portal, Boot-Bildschirm).
 
-## How it works
+## Ablauf
 
 ```mermaid
 flowchart LR
-    MIC[INMP441 / USB mic] --> GATE[SpeechGate<br/>webrtcvad, room-noise threshold]
-    GATE -->|one utterance| STT[Whisper base<br/>text + confidence]
-    STT --> R{router}
-    R -->|stop, move, follow, look,<br/>volume, remember, weather...| ACT[actions.py<br/>motors, tracker, camera,<br/>memory, body, face]
-    R -->|anything else| LLM[Qwen3 1.7B<br/>streams sentences]
-    ACT -->|one short sentence| TTS[Piper]
-    LLM -->|each sentence as it is ready| TTS
-    TTS --> SPK[Speaker]
-    CAM[Pi camera / USB camera] --> YOLO[YOLO11n] --> ACT
+    MIC[INMP441] --> GATE[SpeechGate<br/>webrtcvad]
+    GATE -->|eine Äußerung| STT[Parakeet v3<br/>Text + Sicherheit]
+    STT --> R{Router}
+    R -->|stopp, fahr, folge, schau,<br/>Lautstärke, merk dir, Wetter...| ACT[actions.py<br/>Motoren, Tracker, Kamera,<br/>Gedächtnis, Körper, Gesicht]
+    R -->|alles andere| LLM[Qwen3 1.7B<br/>Satz für Satz]
+    ACT -->|ein kurzer Satz| TTS[Piper Kerstin]
+    LLM -->|jeder fertige Satz| TTS
+    TTS --> SPK[Lautsprecher]
+    CAM[Pi-Kamera] --> YOLO[YOLO11n] --> ACT
 ```
 
-Measured with Qwen3 1.7B on a Pi 4, letting the LLM choose tools took **7–13 s per command** (even "Stop!") and picked
-the right tool 9 times out of 12. The router understands a command instantly, so a command costs only speech
-recognition. The LLM only chats; it gets no tool list, which also made its answers better.
+```mermaid
+flowchart LR
+    subgraph robot.py
+        B[brain.py] -->|HTTP /inference| P
+        B -->|HTTP /v1/chat/completions| L
+    end
+    P[nv/parakeet_server.py<br/>Port 8181<br/>libparakeet über ctypes] 
+    L[llama-server<br/>Port 8180]
+```
 
-- **Confidence check.** Whisper's `avg_logprob` comes with every utterance. Commands that change something (move, follow, remember,
-  volume...) need ≥ −0.75, shutdown and forget ≥ −0.6, chat ≥ −0.6; otherwise the robot asks again instead of acting on a guess.
-  "Stop" is never blocked. Short mishearings of it ("Top!", "Shop") also stop the robot, because stopping is always safe.
-- **Half duplex**, as in NeuroVision: while the robot speaks or its motors run, the microphone is ignored.
-- **Notes for the LLM.** Up to two memories matching the question's content words, and what the robot saw in the last
-  two minutes, are added to the question. The whole memory list is not added: every 8 tokens cost about 1 s on the Pi 4.
-- **Streaming.** Qwen's answer is spoken sentence by sentence; Piper prepares the next sentence while the speaker plays.
-- **Servers.** `robot.py` starts `llama-server` (port 8180) and `whisper-server` (8181) while it opens the hardware, and stops them on exit.
-  The ports differ from NeuroBrain's, so neither kills the other's servers.
+### Warum Parakeet statt Whisper
 
-## What you can say
+Gemessen auf dem Roboter (20 deutsche Sätze, über den Robotlautsprecher abgespielt und mit dem INMP441 aufgenommen):
 
-| Say | Does |
+| Modell | Wörter richtig | Sätze exakt | Zeit pro Satz |
+|---|---|---|---|
+| Whisper base Q5_0 (`-l de`) | 38 % | 2/20 | 3,7 s |
+| Whisper small Q5_1 (`-l de`) | 49 % | 1/20 | 15,3 s |
+| **Parakeet v3 q4_k** | **88 %** | **17/20** | **1,7 s** |
+| Parakeet v3 q8_0 | 88 % | 17/20 | 1,7 s (668 MB statt 415 MB) |
+
+whisper.cpp baut `libparakeet.so`, aber keinen Server dafür. `nv/parakeet_server.py` lädt die Bibliothek mit `ctypes`,
+hält das Modell im Speicher und antwortet wie `whisper-server` (gleiches `/inference`, gleiche Felder), damit
+`SpeechToText` gleich bleibt. Die Sicherheit ist der Mittelwert der Token-Log-Wahrscheinlichkeiten: richtig gehörte
+Sätze lagen bei −0,00 bis −0,16, falsch gehörte bei −0,7 bis −1,0. Befehle brauchen ≥ −0,5, Ausschalten und Vergessen
+≥ −0,35, Plaudern ≥ −0,6; sonst fragt der Roboter nach.
+
+Parakeet erkennt 25 Sprachen selbst und schreibt einen kurzen deutschen Befehl manchmal englisch („Fahr vorwärts.“ →
+„Far forwards.“). Der Router versteht darum auch die englischen Richtungswörter.
+
+### Die Stimme
+
+Piper 1.3 zerlegt das „ç“ (der Ich-Laut in „ich“, „nicht“, „mich“) in „c“ und eine Cedille, die die Stimme nicht kennt:
+„ich“ klang wie „ick“. `TextToSpeech` fügt solche Paare wieder zusammen.
+
+## Was man sagen kann
+
+| Sagen | Macht |
 |---|---|
-| "Stop!", "Stop following me" | stops motors and tracking |
-| "Go forward a little", "Turn left slowly", "Back up for two seconds" | `move` (0.25–3 s; a little = 0.3 s) |
-| "Follow me", "Track the red cup", "Follow the blue thing", "Look at me" | `track` (turns in place) |
-| "Turn to the bottle", "Face the laptop" | one turn toward an object |
-| "What do you see?", "Do you see a phone?" | YOLO11n: "I can see a person in front of me and a red cup on the left." |
-| "Louder", "Set the volume to 40", "Move slower from now on" | speaker volume, motor speed level (both remembered) |
-| "How hot are you?", "How are you feeling?", "How is your Wi-Fi?" | `body_status` |
-| "Smile", "Look surprised" | face expression |
-| "Remember that my keys are in the blue bowl", "My daughter's name is Elif", "I live in Izmir" | saved to `data/memory.db` |
-| "Where are my keys?", "What do you remember about Elif?", "Forget about my keys" | memory search / delete |
-| "What's the weather in Ankara?", "Will it rain tomorrow?" | Open-Meteo (needs internet; place from memory if not said) |
-| "Who was Albert Einstein?", "Look up black holes" | English Wikipedia (without internet the LLM answers) |
-| "What time is it?" | local clock |
-| "Shut down the system", "Turn yourself off" | power off the Pi / stop the program |
-| anything else | Qwen chat |
+| „Stopp!“, „Halt!“, „Bleib stehen“, „Halten Sie an“ | Motoren und Tracking aus |
+| „Fahr ein bisschen vorwärts“, „Dreh dich langsam nach links“, „Fahr zwei Sekunden zurück“ | `move` (0,25–3 s; ein bisschen = 0,3 s) |
+| „Folge mir“, „Verfolge die rote Tasse“, „Folge dem blauen Ding“, „Schau mich an“ | `track` |
+| „Dreh dich zur Flasche“, „Schau auf den Laptop“ | einmal zum Gegenstand drehen |
+| „Was siehst du?“, „Siehst du ein Handy?“ | „Ich sehe eine Person vor mir und eine rote Tasse links.“ |
+| „Lauter“, „Stell die Lautstärke auf sechzig“, „Fahr ab jetzt langsamer“ | Lautstärke, Motorgeschwindigkeit (gespeichert) |
+| „Wie warm bist du?“, „Wie geht es dir?“, „Wie ist dein WLAN?“ | `body_status` |
+| „Lächle“, „Schau überrascht“ | Gesichtsausdruck |
+| „Merk dir, dass meine Schlüssel in der blauen Schale sind“, „Ich heiße Mustafa“, „Ich wohne in München“ | in `data/memory.db` |
+| „Wo sind meine Schlüssel?“, „Wer bin ich?“, „Vergiss meine Schlüssel“ | Gedächtnis suchen / löschen |
+| „Wie wird das Wetter morgen in Berlin?“ | Open-Meteo (Ort aus dem Gedächtnis, wenn keiner genannt) |
+| „Wer war Albert Einstein?“, „Schlag schwarze Löcher nach“ | deutsche Wikipedia |
+| „Wie spät ist es?“ | Uhr und Datum |
+| „Fahr das System herunter“, „Schalte dich aus“ | Pi ausschalten / Programm beenden |
+| alles andere | Qwen plaudert |
 
-## Measured on the Pi 4 (bench: C270 USB webcam, speaker, questions played through the speaker)
+Gespeicherte Fakten zitieren den Nutzer („Der Nutzer sagte: „Ich heiße Mustafa.““), damit Qwen „mein Name“ nicht für
+seinen eigenen Namen hält; vorgelesen werden sie in der Du-Form („Du heißt Mustafa.“).
+
+## Gemessen auf dem Roboter (Pi 4)
 
 | | |
 |---|---|
-| Power-on to "I'm ready." (commands) / chat ready | ~33 s / ~77 s on the robot (cold SD card) |
-| Command, from end of speech to the robot's answer | **~4 s** (3.7–4 s of it is Whisper) |
-| Chat, first spoken sentence | 3.5–9 s after recognition; whole turn 7–15 s |
-| Router accuracy (66 test sentences, `tests/test_router.py`) | 66/66 |
-| Voice test (`tests/e2e_voice.py`, 14 questions) | 14/14 heard; 12 answered right; "bowl" heard as "ball" once; a one-word "Stop." heard as "Don't!" was asked again |
-| RAM | ~2.0 GB: Qwen 1.55 GB, robot 0.27 GB, Whisper 0.13 GB |
+| Start bis „Ich bin bereit.“ | ~10–14 s bei warmem Cache (Parakeet lädt in ~5 s) |
+| Befehl, vom Ende der Äußerung bis zur Antwort | **~2 s** (Whisper-Version: ~4 s) |
+| Plaudern, erster gesprochener Satz | 3,5–5 s nach der Erkennung; ganze Runde 6–15 s |
+| Qwen auf Deutsch | 3,3 Token/s, wie auf Englisch |
+| Router (`tests/test_router.py`) | 97/97 |
+| RAM | ~2,2 GB: Qwen 1,5 GB, Parakeet 0,47 GB, Roboter 0,21 GB |
 
-## Setup
+## Einrichtung
 
-The models and binaries are the ones NeuroBrain uses on this Pi (paths in `config.toml` `[local]`):
+Gleiche Binärdateien wie die englische Version (Pfade in `config.toml` `[local]`):
 
 ```bash
-# llama.cpp and whisper.cpp built in ~/neurobrain/llama.cpp and ~/whisper.cpp
-# Qwen3 1.7B Q4_K_M:  ~/neurobrain/models/qwen3-1.7b-q4km.gguf
-# Whisper base Q5_0 (made locally from ggml-base.bin):
-cd ~/whisper.cpp/models && ../build/bin/whisper-quantize ggml-base.bin ggml-base-q5_0.bin q5_0
-# Piper voice: ~/neurobrain/tts/en_US-lessac-medium.onnx (+ .json)
+# Parakeet v3 (q4_k) von ggml-org/parakeet-GGUF:
+cd ~/whisper.cpp/models && curl -LO https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q4_k.bin
+# Kerstin (Piper):
+mkdir -p ~/neurobrain/tts/de && cd ~/neurobrain/tts/de
+curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/kerstin/low/de_DE-kerstin-low.onnx
+curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/kerstin/low/de_DE-kerstin-low.onnx.json
 
-cd ~/projects/neurovision-local
-uv venv --system-site-packages --python /usr/bin/python3 .venv   # lgpio and Pillow come from the system
+cd ~/projects/neurovision-local-deutsch
+uv venv --system-site-packages --python /usr/bin/python3 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
-bash deploy/get-model.sh                                         # YOLO11n -> models/yolo11n_320.onnx
+bash deploy/get-model.sh
 ```
 
-Robot hardware (Pi camera, INMP441 + MAX98357A on I2S, ST7789 on SPI, MX1508): same pins and settings as the Zero 2W.
-To make a Pi 4 the robot (checked against the Zero on 2026-10-28: same code, `config.toml`, `~/.asoundrc`, services and
-`config.txt` lines):
+## Starten
 
 ```bash
-cp deploy/asoundrc ~/.asoundrc
-bash deploy/install-service.sh        # user service neurovision-local, starts at boot
-sudo bash deploy/setup-pi4.sh         # I2S card, SPI, camera, poweroff rule, boot chime, Wi-Fi portal, linger
-sudo reboot
+.venv/bin/python robot.py                            # Roboter-Hardware
+.venv/bin/python -m tests.test_router                # Router-Test ohne Hardware
+.venv/bin/python -m tests.e2e_voice config.dev.toml  # Sprachtest über den Lautsprecher (Thorsten-Stimme)
 ```
 
-After power-on the robot says "I'm ready." and takes commands after ~33 s (Whisper loads in ~12 s); chat follows
-about 45 s later, when Qwen has loaded from the SD card (~36 s) and cached its prompt. Until then it says it is still
-waking up.
-
-## Running
-
-```bash
-.venv/bin/python robot.py --config config.dev.toml   # Pi 4 bench: C270 camera + mic, default speaker, no face, no motors
-.venv/bin/python robot.py                            # robot hardware (config.toml)
-.venv/bin/python robot.py --check                    # hardware test: mic, speaker, camera
-.venv/bin/python -m tests.test_router                # router test, no hardware
-.venv/bin/python -m tests.e2e_voice config.dev.toml  # voice test through the speaker
-```
-
-As a service (replaces the Gemini service while it runs: `Conflicts=neurovision.service`):
+Als Dienst beim Einschalten (beendet die englische und die Gemini-Version und nimmt sie aus dem Autostart):
 
 ```bash
 bash deploy/install-service.sh
-systemctl --user status neurovision-local
-tail -f logs/robot.log            # every turn: what was heard, confidence, route, answer, timings
+systemctl --user status neurovision-local-deutsch
+tail -f logs/robot.log
 ```
 
-Logs: `logs/robot.log`, `logs/llm-server.log`, `logs/stt-server.log`; the last 10 utterances as WAV in `logs/debug/`.
+Zurück zur englischen Version:
 
-## Files
+```bash
+systemctl --user disable --now neurovision-local-deutsch
+systemctl --user enable --now neurovision-local
+```
 
-| File | Role |
+## Dateien
+
+| Datei | Rolle |
 |---|---|
-| `robot.py` | Start-up: local AI servers, hardware, brain; `--check` |
-| `config.toml` / `config.dev.toml` | Robot hardware / Pi 4 bench (only audio devices, camera backend, face and motors differ) |
-| `nv/brain.py` | **new** – listen → recognise → route → act or chat → speak (replaces `live.py`) |
-| `nv/router.py` | **new** – English commands → NeuroVision tools |
-| `nv/actions.py` | **new** – runs the tools, writes the spoken English answers (replaces `tools.py`) |
-| `nv/local_ai.py` | **new** – llama-server / whisper-server processes, Whisper client, Qwen streaming, Piper |
-| `nv/camera.py` | NeuroVision + `backend = "v4l2"` for a USB camera (same MJPEG stream through ffmpeg) |
-| `nv/tracker.py` | NeuroVision; tracking events are spoken English sentences |
-| `nv/web.py` | NeuroVision; English place names, weather words and Wikipedia |
-| `nv/audio.py`, `vad.py`, `display.py`, `motors.py`, `vision.py`, `body.py`, `memory.py`, `debug.py` | NeuroVision, unchanged |
-| removed | `live.py`, `tools.py`, `summarizer.py` (Gemini), `radio.py` (was off), `lang.py` (Turkish check) |
+| `nv/router.py` | deutsche Befehle → NeuroVision-Werkzeuge |
+| `nv/actions.py` | führt die Werkzeuge aus, schreibt die deutschen Antworten |
+| `nv/german.py` | **neu** – deutsche Nomen mit Geschlecht, Farben, Artikel, Fälle, Zahlwörter („sechzig“ → 60) |
+| `nv/parakeet_server.py` | **neu** – Parakeet als HTTP-Server (ctypes, `libparakeet.so`) |
+| `nv/local_ai.py` | startet llama-server und Parakeet; Piper mit Ich-Laut-Korrektur |
+| `nv/brain.py`, `nv/tracker.py`, `nv/web.py` | deutsche Sätze, deutsche Füllwörter, deutsches Wetter und Wikipedia |
+| `deploy/neurovision-local-deutsch.service` | Benutzerdienst (`Conflicts=` mit der englischen und der Gemini-Version) |
 
-## Limits
+## Grenzen
 
-- Qwen3 1.7B produces ~3 tokens/s on the Pi 4, so chat answers take a few seconds and are kept to two short sentences.
-  It can invent facts; the confidence check keeps the worst misheard questions away from it.
-- Whisper base still mishears names ("Izmir" → "his mirror") and short words.
-- `look` names only the 80 COCO object classes plus colours; it cannot describe a scene. A vision LLM (Qwen3.5 2B)
-  took 25–37 s per frame on the Pi 4.
-- No automatic memory summaries yet (Gemini Flash-Lite did that); facts are saved when you ask.
-- While the motors run the microphone is off (as in NeuroVision), so "stop" is heard between moves; a move lasts at most 3 s.
+- Parakeet erkennt die Sprache selbst; kurze Befehle mit Akzent kommen manchmal in einer anderen Sprache heraus. Die
+  Sicherheitsprüfung fängt das ab: der Roboter fragt nach, statt zu raten.
+- Qwen3 1.7B spricht ordentliches, aber einfaches Deutsch und kann Fakten erfinden.
+- `look` kennt nur die 80 COCO-Klassen und Farben.

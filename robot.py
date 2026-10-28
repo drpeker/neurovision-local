@@ -1,4 +1,4 @@
-"""NeuroVision local: voice and vision robot with an on-device brain (Qwen 1.7B, Whisper, Piper).
+"""NeuroVision local (Deutsch): voice and vision robot with an on-device brain (Qwen 1.7B, Parakeet, Piper).
 
     .venv/bin/python robot.py                          # run the robot (robot hardware)
     .venv/bin/python robot.py --config config.dev.toml # Pi 4 bench: USB camera and mic
@@ -114,7 +114,7 @@ async def run(cfg: dict) -> None:
         face = await make_face(cfg, speaker, brain)
         motors = make_motors(cfg, brain, memory)
         tracker = make_vision(cfg, camera, motors, brain, face)
-        # Commands need only Whisper (~12 s); Qwen takes ~36 s to load from the SD card and is
+        # Commands need only Parakeet (~5 s); Qwen takes ~36 s to load from the SD card and is
         # only needed for chat, so the robot starts listening without waiting for it
         await servers.wait_ready(("STT",))
         log.info("speech recognition loaded in %.1f s", time.monotonic() - started)

@@ -1,4 +1,4 @@
-"""Online extras: weather (Open-Meteo) and encyclopedia lookups (English Wikipedia).
+"""Online extras: weather (Open-Meteo) and encyclopedia lookups (German Wikipedia).
 
 Both are free and need no key. Requests run in a thread, so listening never waits for them;
 without internet the local brain says so (weather) or lets the LLM answer (Wikipedia).
@@ -17,12 +17,12 @@ TIMEOUT = 8
 
 # WMO weather codes (Open-Meteo)
 WEATHER_CODES = {
-    0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "foggy", 48: "foggy with rime",
-    51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 56: "freezing drizzle", 57: "freezing drizzle",
-    61: "light rain", 63: "rain", 65: "heavy rain", 66: "freezing rain", 67: "freezing rain",
-    71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains",
-    80: "light showers", 81: "showers", 82: "heavy showers", 85: "snow showers", 86: "heavy snow showers",
-    95: "thunderstorms", 96: "thunderstorms with hail", 99: "severe thunderstorms with hail",
+    0: "klar", 1: "überwiegend klar", 2: "teilweise bewölkt", 3: "bedeckt", 45: "neblig", 48: "neblig mit Raureif",
+    51: "leichter Nieselregen", 53: "Nieselregen", 55: "starker Nieselregen", 56: "gefrierender Nieselregen",
+    57: "gefrierender Nieselregen", 61: "leichter Regen", 63: "Regen", 65: "starker Regen", 66: "gefrierender Regen",
+    67: "gefrierender Regen", 71: "leichter Schneefall", 73: "Schneefall", 75: "starker Schneefall", 77: "Schneegriesel",
+    80: "leichte Schauer", 81: "Schauer", 82: "starke Schauer", 85: "Schneeschauer", 86: "starke Schneeschauer",
+    95: "Gewitter", 96: "Gewitter mit Hagel", 99: "schwere Gewitter mit Hagel",
 }
 
 
@@ -34,7 +34,7 @@ def _get(url: str, params: dict) -> dict:
 
 def _weather(place: str, days: int) -> dict:
     found = _get("https://geocoding-api.open-meteo.com/v1/search",
-                 {"name": place, "count": 1, "language": "en", "format": "json"}).get("results")
+                 {"name": place, "count": 1, "language": "de", "format": "json"}).get("results")
     if not found:
         return {"error": f"No place called '{place}'."}
     loc = found[0]
@@ -49,11 +49,11 @@ def _weather(place: str, days: int) -> dict:
         "place": ", ".join(x for x in (loc.get("name"), loc.get("admin1"), loc.get("country")) if x),
         "now": {
             "time": cur["time"][-5:], "temp_c": cur["temperature_2m"], "feels_like_c": cur["apparent_temperature"],
-            "humidity": cur["relative_humidity_2m"], "condition": WEATHER_CODES.get(cur["weather_code"], "unknown"),
+            "humidity": cur["relative_humidity_2m"], "condition": WEATHER_CODES.get(cur["weather_code"], "unbekannt"),
             "wind_kmh": cur["wind_speed_10m"],
         },
         "days": [{
-            "date": d["time"][i], "condition": WEATHER_CODES.get(d["weather_code"][i], "unknown"),
+            "date": d["time"][i], "condition": WEATHER_CODES.get(d["weather_code"][i], "unbekannt"),
             "min_c": d["temperature_2m_min"][i], "max_c": d["temperature_2m_max"][i],
             "rain_chance": d["precipitation_probability_max"][i],
         } for i in range(len(d["time"]))],
@@ -61,7 +61,7 @@ def _weather(place: str, days: int) -> dict:
 
 
 def _wiki(query: str) -> dict:
-    api = "https://en.wikipedia.org/w/api.php"
+    api = "https://de.wikipedia.org/w/api.php"
     hits = _get(api, {"action": "query", "list": "search", "srsearch": query, "srlimit": 1,
                       "format": "json"})["query"]["search"]
     if not hits:

@@ -1,10 +1,10 @@
-# NeuroVision local: robot hardware settings (pins and tuning as on the Zero 2W robot).
+# NeuroVision local (Deutsch): robot hardware settings (pins and tuning as on the Zero 2W robot).
 # config.dev.toml is the Pi 4 bench variant (USB camera and microphone, no motors).
 
 [local]
-# The brain runs on the Pi: llama.cpp (Qwen), whisper.cpp and Piper. Pi 4 (4 GB) only:
+# The brain runs on the Pi: llama.cpp (Qwen), Parakeet (whisper.cpp's libparakeet) and Piper. Pi 4 (4 GB) only:
 # the models need ~2 GB of RAM, more than a Zero 2W has.
-language = "en"
+language = "de"
 llama_server = "/home/drpeker/neurobrain/llama.cpp/build/bin/llama-server"
 llm_model = "/home/drpeker/neurobrain/models/qwen3-1.7b-q4km.gguf"
 llm_context = 2048
@@ -12,30 +12,31 @@ llm_threads = 4
 llm_port = 8180
 # ~3 tokens/s on a Pi 4: 60 tokens is about two short sentences
 llm_max_tokens = 60
-whisper_server = "/home/drpeker/whisper.cpp/build/bin/whisper-server"
-# base Q5_0 (made with whisper-quantize): 88 % word match in the running app, 3.7 s per question;
-# tiny Q4_0 80 % / 1.9 s
-stt_model = "/home/drpeker/whisper.cpp/models/ggml-base-q5_0.bin"
-stt_vad_model = "/home/drpeker/whisper.cpp/models/for-tests-silero-v6.2.0-ggml.bin"
+# Speech recognition: NVIDIA Parakeet TDT 0.6B v3 (25 European languages), the q4_k file from
+# ggml-org/parakeet-GGUF run through whisper.cpp's libparakeet. On the robot microphone, German:
+# 17/20 sentences exact, 1.7 s per sentence; Whisper base got 2/20 (3.7 s), small 1/20 (15 s)
+parakeet_lib = "/home/drpeker/whisper.cpp/build/bin/libparakeet.so"
+stt_model = "/home/drpeker/whisper.cpp/models/ggml-parakeet-tdt-0.6b-v3-q4_k.bin"
 stt_threads = 4
 stt_port = 8181
-voice = "/home/drpeker/neurobrain/tts/en_US-lessac-medium.onnx"
-# Whisper confidence (avg_logprob) needed to act. On the robot's INMP441 correct commands scored
-# -0.26 to -0.72 ("Follow me!" -0.58 was refused at -0.5); misheard ones -0.78 to -0.92
-min_command_logprob = -0.75
+# Piper de_DE-kerstin-low: an official Piper German female voice (16 kHz, resampled to 24 kHz)
+voice = "/home/drpeker/neurobrain/tts/de/de_DE-kerstin-low.onnx"
+# Parakeet confidence (mean token log-probability) needed to act. On the robot microphone correct
+# German sentences scored -0.00 to -0.16; misheard ones ("Folge mir." -> "For your comir.") -0.8 to -1.0
+min_command_logprob = -0.5
 # Not undoable (shutdown, forget): stricter
-min_risky_logprob = -0.6
+min_risky_logprob = -0.35
 min_chat_logprob = -0.6
-# Weather when no place is said and none is remembered ("I live in ..."); empty: the robot asks
+# Weather when no place is said and none is remembered ("Ich wohne in ..."); empty: the robot asks
 home_city = ""
 # Kept short: Qwen 1.7B follows a few plain lines better than many rules. Robot commands
 # never reach the LLM (nv/router.py), so it needs no tool descriptions. Only the name: with
 # "You are a small home robot." it answered "I can't know things like capital cities".
 system_prompt = """
-Your name is NeuroVision.
-Always speak English.
-Answer briefly, naturally, and accurately.
-Use one or two short sentences whenever possible.
+Du heißt NeuroVision.
+Sprich immer Deutsch.
+Antworte kurz, natürlich und korrekt.
+Benutze möglichst ein oder zwei kurze Sätze.
 """
 
 [audio]

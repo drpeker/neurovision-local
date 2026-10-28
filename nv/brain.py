@@ -1,6 +1,6 @@
 """Local brain: replaces NeuroVision's Gemini Live session with models running on the Pi.
 
-    microphone -> SpeechGate (webrtcvad) -> Whisper -> router -+-> actions (instant)  -+-> Piper -> speaker
+    microphone -> SpeechGate (webrtcvad) -> Parakeet -> router -+-> actions (instant)  -+-> Piper -> speaker
                                                               +-> Qwen chat (stream) -+
 
 Same attach_* hooks as the old LiveBrain, so robot.py, the face, motors and tracker are wired
@@ -26,19 +26,20 @@ from .vad import SpeechGate
 
 log = logging.getLogger(__name__)
 
-# Whisper avg_logprob below these: the words were probably guessed (measured on the C270 and
-# a speaker test set). Commands that change something are not run on a guess; chat asks again.
+# Parakeet mean token log-probability below these: the words were probably guessed (measured on
+# the robot microphone). Commands that change something are not run on a guess; chat asks again.
 GUARDED = {"move", "track", "turn_to", "remember", "forget", "volume", "motor_speed", "shutdown", "express"}
 # Not undoable: these need the stricter min_risky_logprob
 RISKY = {"shutdown", "forget"}
 NOTES_MAX_AGE = 120  # s; what the robot last saw is given to the LLM for this long
-# Memory search (nv/memory.py) was written for Turkish: English filler words matched every
-# fact ("the" -> any fact with "the"), so a joke request got a note about the user's keys
-STOPWORDS = set("""about after again also always another any around because been before being both
-could does doing done down each even every from have having here into just know like make many
-more most much never only other over please really said same should some still such tell than
-that their them then there these they thing think this those through very want were what when
-where which while will with would your yours you're what's that's it's don't can't""".split())
+# Memory search (nv/memory.py) was written for Turkish: German filler words would match every
+# fact ("eine" -> any fact with "eine"), so a joke request would get a note about the user's keys
+STOPWORDS = set("""aber alle allem allen aller alles also andere anderen auch bitte dann darf darum dass dein
+deine deinem deinen deiner denn dich dies diese diesem diesen dieser dieses doch dort durch eine einem
+einen einer eines erzähl erzähle etwas euch gerade gibt habe haben hast hatte heute hier hinter ihre
+immer jetzt kann kannst kein keine können könnte machen mache macht mehr mein meine meinem meinen meiner
+mich muss nach nicht noch oder ohne sage schon sehr sein seine sich sind soll sollte über unter viel
+vielleicht warum weil welche welcher welches wenn werden wieder wird wirklich wissen wollen würde""".split())
 
 
 class LocalBrain:
@@ -136,7 +137,7 @@ class LocalBrain:
             # The face shows "offline" (flat gray eyes) until this is set; Gemini Live set it on
             # connect, here it means speech recognition is loaded and the robot is listening
             self.body.connected_since = time.monotonic()
-            self.say("I'm ready.")
+            self.say("Ich bin bereit.")
             await self._listen()
         finally:
             self.body.connected_since = None
@@ -210,9 +211,9 @@ class LocalBrain:
                  text, len(pcm) / 32000, heard_s, confidence, tool, args or "")
 
         if tool in RISKY and confidence < self._min_risky or tool in GUARDED and confidence < self._min_command:
-            answer = "Sorry, I'm not sure I heard that right. Please say it again."
+            answer = "Entschuldigung, ich bin nicht sicher, ob ich das richtig gehört habe. Bitte sag es noch einmal."
         elif tool == "chat" and confidence < self._min_chat:
-            answer = "Sorry, I didn't catch that. Could you say it again?"
+            answer = "Entschuldigung, das habe ich nicht verstanden. Kannst du es wiederholen?"
         else:
             answer = await self.actions.run(tool, args)
         if answer is not None:
@@ -229,18 +230,18 @@ class LocalBrain:
     async def _chat(self, text: str) -> str:
         """Qwen answers; a few notes (matching memories, what it just saw) go with the question."""
         if not self._llm_ready:
-            answer = "I'm still waking up. I can already move, look and follow, but I can't chat yet."
+            answer = "Ich werde noch wach. Fahren, schauen und folgen kann ich schon, aber plaudern noch nicht."
             self.say(answer)
             return answer
-        words = [w for w in re.findall(r"[a-z']{4,}", text.lower()) if w not in STOPWORDS]
-        # Facts stay in the third person ("The user's name is Mustafa."): turned into "Your name
-        # is Mustafa." the model read "your" as itself and answered "My name is Mustafa."
+        words = [w for w in re.findall(r"[a-zäöüß]{4,}", text.lower()) if w not in STOPWORDS]
+        # Facts quote the user ('Der Nutzer sagte: „Ich heiße Mustafa.“'): in the English version
+        # "Your name is Mustafa." made the model answer "My name is Mustafa."
         facts = [t for _, _, t in self._memory.recall(" ".join(words), limit=2)] if words else []
-        notes = ["About the user: " + " ".join(facts)] if facts else []
+        notes = ["Notizen über den Nutzer: " + " ".join(facts)] if facts else []
         seen = self.actions.last_seen
         if seen and time.monotonic() - seen[0] < NOTES_MAX_AGE:
-            notes.append("What you saw recently: " + seen[1])
-        prompt = text if not notes else "\n".join(notes) + f"\n\nUser: {text}"
+            notes.append("Was du gerade gesehen hast: " + seen[1])
+        prompt = text if not notes else "\n".join(notes) + f"\n\nNutzer: {text}"
         t0 = time.monotonic()
         first: list[float] = []
 
@@ -253,12 +254,12 @@ class LocalBrain:
             answer, cut = await self._llm.chat(prompt, on_sentence)
         except Exception as e:
             log.warning("LLM failed: %s", e)
-            answer = "Sorry, my thinking stopped for a moment."
+            answer = "Entschuldigung, mein Denken hat kurz ausgesetzt."
             self.say(answer)
             return answer
         log.info("LLM first sentence %.2f s, total %.2f s%s", first[0] if first else 0,
                  time.monotonic() - t0, " (cut at token limit)" if cut else "")
         if not answer:
-            answer = "I'm not sure what to say."
+            answer = "Ich weiß nicht, was ich sagen soll."
             self.say(answer)
         return answer

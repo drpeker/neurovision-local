@@ -1,52 +1,64 @@
-"""English command router: robot commands are matched by words, not by the LLM.
+"""German command router: robot commands are matched by words, not by the LLM.
 
 Measured with Qwen3 1.7B on a Pi 4: letting the LLM pick a tool took 7-13 s per command
-(even "Stop!") and chose the right tool 9 times out of 12. Here a command is understood
+(even "Stopp!") and chose the right tool 9 times out of 12. Here a command is understood
 in well under a millisecond and anything that is not a command goes to the LLM as chat.
 
 route(text) -> (tool, args). The tool names and argument values are the ones the copied
 NeuroVision modules use (motors: "ileri"/"sol", colours: "kırmızı", emotions: "mutlu").
+German puts the verb last in many requests ("Kannst du nach links fahren?"), so driving and
+following look for the verb anywhere in the sentence, not only at the start.
 """
 
 import re
 
-from .vision import COCO80, COLORED
+from .german import NOUNS, numbers_to_digits
+from .vision import COLORED
 
-# Spoken names -> COCO class (longest first so "cell phone" wins over "phone")
-OBJECTS = {name: name for name in COCO80}
+# Spoken names -> COCO class (singular and plural of every German noun, plus everyday words)
+OBJECTS: dict[str, str] = {}
+for _coco, (_one, _, _many) in NOUNS.items():
+    if _coco != COLORED:
+        OBJECTS[_one.lower()] = OBJECTS[_many.lower()] = _coco
 OBJECTS.update({
-    "me": "person", "us": "person", "you": "person", "him": "person", "her": "person", "someone": "person",
-    "people": "person", "man": "person", "woman": "person", "kid": "person", "child": "person",
-    "phone": "cell phone", "mobile": "cell phone", "smartphone": "cell phone", "mug": "cup", "glass": "cup",
-    "ball": "sports ball", "football": "sports ball", "table": "dining table", "desk": "dining table",
-    "sofa": "couch", "plant": "potted plant", "flower": "potted plant", "television": "tv", "monitor": "tv",
-    "screen": "tv", "computer": "laptop", "notebook": "laptop", "fridge": "refrigerator", "bag": "backpack",
-    "teddy": "teddy bear", "kitty": "cat", "puppy": "dog", "bike": "bicycle", "glasses": "wine glass",
-    "controller": "remote", "tablet": "cell phone",
+    "mich": "person", "mir": "person", "uns": "person", "jemand": "person", "jemanden": "person",
+    "mensch": "person", "menschen": "person", "leute": "person", "mann": "person", "frau": "person",
+    "kind": "person", "kinder": "person", "becher": "cup", "glas": "cup", "tisch": "dining table",
+    "schreibtisch": "dining table", "couch": "couch", "blume": "potted plant", "blumen": "potted plant",
+    "bildschirm": "tv", "monitor": "tv", "computer": "laptop", "rechner": "laptop", "notebook": "laptop",
+    "telefon": "cell phone", "smartphone": "cell phone", "tablet": "cell phone", "tasche": "handbag",
+    "teddy": "teddy bear", "kätzchen": "cat", "welpe": "dog", "rad": "bicycle", "fußball": "sports ball",
+    "controller": "remote", "glases": "cup", "balls": "sports ball",
 })
-OBJECT_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, OBJECTS), key=len, reverse=True)) + r")s?\b")
+OBJECT_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, OBJECTS), key=len, reverse=True)) + r")(?:e|n|en|s|es)?\b")
 
-COLORS = {"red": "kırmızı", "orange": "turuncu", "yellow": "sarı", "green": "yeşil", "blue": "mavi",
-          "purple": "mor", "violet": "mor", "pink": "pembe", "brown": "kahverengi", "black": "siyah",
-          "white": "beyaz", "gray": "gri", "grey": "gri"}
-COLOR_RE = re.compile(r"\b(" + "|".join(COLORS) + r")\b")
+COLORS = {"rot": "kırmızı", "orange": "turuncu", "orangefarben": "turuncu", "gelb": "sarı", "grün": "yeşil",
+          "blau": "mavi", "lila": "mor", "violett": "mor", "rosa": "pembe", "pink": "pembe",
+          "braun": "kahverengi", "schwarz": "siyah", "weiß": "beyaz", "weiss": "beyaz", "grau": "gri"}
+COLOR_RE = re.compile(r"\b(" + "|".join(sorted(COLORS, key=len, reverse=True)) + r")(?:e|en|er|es|em)?\b")
 
-EMOTIONS = {"happy": "mutlu", "smile": "mutlu", "sad": "üzgün", "surprised": "şaşkın", "shocked": "şaşkın",
-            "angry": "kızgın", "mad": "kızgın", "sleepy": "uykulu", "tired": "uykulu", "neutral": "nötr",
+EMOTIONS = {"glücklich": "mutlu", "fröhlich": "mutlu", "lächle": "mutlu", "lächeln": "mutlu", "lach": "mutlu",
+            "traurig": "üzgün", "überrascht": "şaşkın", "erstaunt": "şaşkın", "wütend": "kızgın",
+            "böse": "kızgın", "sauer": "kızgın", "müde": "uykulu", "schläfrig": "uykulu", "neutral": "nötr",
             "normal": "nötr"}
+EMOTION_RE = r"(glücklich|fröhlich|traurig|überrascht|erstaunt|wütend|böse|sauer|müde|schläfrig|neutral|normal)(?:e|en|er|es)?"
 
-NUMBERS = {"half a": 0.5, "a half": 0.5, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+NUMBERS = {"eine halbe": 0.5, "halbe": 0.5, "anderthalb": 1.5, "eineinhalb": 1.5, "eine": 1, "einer": 1}
 
-# A request may be polite ("can you turn left?"); a question about something is not a command
-POLITE = r"^(?:hey |ok |okay |please |now |neurovision |robot )*(?:can you |could you |would you |will you )?(?:please )?"
-QUESTION = re.compile(r"^(how|why|what|when|where|who|which|do|does|did|is|are|was|tell me)\b")
+# A request may be polite ("kannst du bitte ..."); a question about something is not a command
+POLITE = r"^(?:hey |hallo |ok |okay |bitte |jetzt |los |neurovision |roboter )*" \
+         r"(?:kannst du |könntest du |würdest du |kann ich dich bitten )?(?:bitte |mal |jetzt )*"
+QUESTION = re.compile(r"^(wie|warum|wieso|weshalb|was|wann|wo|wohin|woher|wer|welche\w*|ist|sind|war|hast|hat|bist|"
+                      r"gibt|erzähl\w*|sag mir|weißt)\b")
+STATEMENT = re.compile(r"^(ich|wir|er|sie|es|man|der|die|das)\b")
 
 
 def normalize(text: str) -> str:
     t = text.lower().replace("’", "'")
-    t = re.sub(r"[^a-z0-9.' ]", " ", t)
+    t = re.sub(r"(\d),(\d)", r"\1.\2", t)  # "1,5 sekunden"
+    t = re.sub(r"[^a-zäöüß0-9.' ]", " ", t)
     t = re.sub(r"(?<![0-9])\.|\.(?![0-9])", " ", t)  # keep "1.5", drop sentence dots
-    return re.sub(r" +", " ", t).strip()
+    return numbers_to_digits(re.sub(r" +", " ", t).strip())
 
 
 def _order(t: str, verbs: str) -> re.Match | None:
@@ -54,33 +66,37 @@ def _order(t: str, verbs: str) -> re.Match | None:
     return re.match(POLITE + r"(?:" + verbs + r")\b", t)
 
 
+def _request(t: str) -> bool:
+    """An order or a polite request, not a question or a statement about oneself."""
+    return not QUESTION.match(t) and not STATEMENT.match(t)
+
+
 def _seconds(t: str) -> float:
-    m = re.search(r"(\d+(?:\.\d+)?|half a|a half|one|two|three|four|five) (?:and a half )?seconds?", t)
+    m = re.search(r"(\d+(?:\.\d+)?|eine halbe|halbe|anderthalb|eineinhalb|eine|einer) (?:halbe )?sekunden?", t)
     if m:
-        value = NUMBERS.get(m.group(1)) or float(m.group(1))
-        return value + (0.5 if "and a half" in m.group(0) else 0)
-    if re.search(r"\b(a little|a bit|a little bit|slightly|a tiny bit|bit)\b", t):
+        return NUMBERS.get(m.group(1)) or float(m.group(1))
+    if re.search(r"\b(ein bisschen|ein bißchen|bisschen|ein wenig|etwas|ein stück|ein stückchen|kurz|leicht)\b", t):
         return 0.3
-    if re.search(r"\b(a lot|far|a long way|more)\b", t):
+    if re.search(r"\b(weit|viel|ein ganzes stück|lange|länger|mehr)\b", t):
         return 2.0
     return 1.0
 
 
 def _speed(t: str) -> str:
-    if re.search(r"\bvery slow(ly)?\b", t):
+    if re.search(r"\bsehr langsam\b|\bganz langsam\b", t):
         return "çok yavaş"
-    if re.search(r"\b(slow|slowly|gently|carefully)\b", t):
+    if re.search(r"\b(langsam|vorsichtig|sachte|behutsam)\b", t):
         return "yavaş"
-    if re.search(r"\b(fast|quickly|quick)\b", t):
+    if re.search(r"\b(schnell|zügig|flott)\b", t):
         return "hızlı"
     return "normal"
 
 
 def _target(phrase: str) -> tuple[str | None, str | None]:
-    """'the red cup' -> ("cup", "kırmızı"); 'the blue thing' -> ("colored object", "mavi")."""
+    """'die rote tasse' -> ("cup", "kırmızı"); 'das blaue ding' -> ("colored object", "mavi")."""
     color = None
     m = COLOR_RE.search(phrase)
-    # "orange" alone is the fruit; with another object word after it, it is a colour
+    # "Orange" alone is the fruit; with another object word after it, it is a colour
     if m and not (m.group(1) == "orange" and not OBJECT_RE.search(phrase[m.end():])):
         color = COLORS[m.group(1)]
         phrase = phrase[:m.start()] + phrase[m.end():]
@@ -90,15 +106,18 @@ def _target(phrase: str) -> tuple[str | None, str | None]:
     return (COLORED, color) if color else (None, None)
 
 
-def _third_person(text: str) -> str:
-    """'my daughter is Elif' -> 'The user's daughter is Elif.' (stored facts are about the user)."""
+def _strip_that(text: str) -> str:
+    """'Merk dir, dass meine Schlüssel in der Schale sind' -> 'Dass meine Schlüssel in der Schale sind'."""
     t = text.strip().rstrip(".!? ")
-    t = re.sub(r"\bi (live|work|like|love|prefer|hate|own|use|play|drink|eat|need|want)\b", r"the user \1s", t, flags=re.I)
-    t = re.sub(r"\bi have\b", "the user has", t, flags=re.I)
-    for a, b in ((r"\bi am\b", "the user is"), (r"\bi'm\b", "the user is"), (r"\bi\b", "the user"),
-                 (r"\bmy\b", "the user's"), (r"\bme\b", "the user"), (r"\bmine\b", "the user's")):
-        t = re.sub(a, b, t, flags=re.I)
-    return t[:1].upper() + t[1:] + "."
+    t = re.sub(r"^(?:\w+\s+)*?(?:merk|merke|notier|notiere|vergiss nicht|denk daran|denke daran)\w*(?:\s+dir)?[,:]?\s*", "",
+               t, flags=re.I)
+    return t[:1].upper() + t[1:]
+
+
+def fact(text: str) -> str:
+    """Stored facts quote the user: 'Der Nutzer sagte: „Ich heiße Mustafa.“'. In the first person
+    the LLM read 'my name' as its own name, so the speaker is always named."""
+    return f"Der Nutzer sagte: „{_strip_that(text)}.“"
 
 
 def route(text: str) -> tuple[str, dict]:
@@ -107,135 +126,154 @@ def route(text: str) -> tuple[str, dict]:
         return "chat", {}
 
     # --- safety first ---
-    if _order(t, r"stop|halt|freeze|stay still|stand still|don't move|do not move") or t in ("wait", "enough"):
+    if _order(t, r"stopp|stop|stoppe|halt|anhalten|halte an|halt an|bleib stehen|bleib stehn|stehen bleiben|"
+                 r"nicht bewegen|beweg dich nicht|hör auf|aufhören|warte|genug|schluss|aus jetzt") \
+            or t in ("warte", "genug", "stopp", "halt"):
         return "stop", {}
-    # A short "Stop!" often loses its first sound ("Top!", "Stopped", "Shop"); stopping is always safe
-    if re.fullmatch(r"(top|tops|stopped|stops|stopping|shop|sup|stop it|top it|stoppit|hop|s top)( now| it| please)?", t):
+    if _order(t, r"(halten|bleiben) sie (an|stehen)|hören sie auf"):
+        return "stop", {}
+    # A short "Stopp!" often loses its first sound or comes out English; stopping is always safe
+    if re.fullmatch(r"(top|tops|stopp?t|stoppen|shop|stop it|hopp|s top|stob|stopf)( jetzt| bitte| sofort)?", t):
         return "stop", {}
 
     # --- power ---
-    if _order(t, r"shut down|shutdown|power off|power down|turn off|switch off|quit|exit|close") \
-            or _order(t, r"(?:turn|switch|shut) (?:yourself|the robot|the system|the pi|everything) (?:off|down)"):
-        if re.search(r"\b(system|pi|raspberry|computer|completely|everything|power off|power down)\b", t):
+    if re.search(r"\b(schalt\w* (dich|das system|den pi|den roboter|alles|den computer|das programm) (aus|ab)|"
+                 r"ausschalten|abschalten|herunterfahren|runterfahren|fahr\w* (dich |das system |den pi )?(herunter|runter)|"
+                 r"beende\w*|beenden)\b", t) and not QUESTION.match(t):
+        if re.search(r"\b(system|pi|raspberry|computer|komplett|ganz|alles|herunterfahren|runterfahren|herunter|runter)\b", t):
             return "shutdown", {"target": "sistem"}
-        if re.search(r"\b(yourself|robot|program|neurovision|app)\b", t):
+        if re.search(r"\b(dich|roboter|programm|neurovision|app|beende\w*|beenden)\b", t):
             return "shutdown", {"target": "robot"}
 
     # --- vision (questions are allowed here) ---
-    # Whisper often drops "do" ("What you see at the moment?"); the LLM then got the question and
-    # made up a scene, so anything asking what the robot sees is a look
-    if re.search(r"\bwhat\b.*\b(you|u) (see|seeing)\b|\b(tell|show) me what you see\b|^look( around)?$"
-                 r"|\bwhat('s| is) (in front|around)\b", t):
+    # Anything asking what the robot sees is a look; the LLM would make a scene up
+    if re.search(r"\bwas siehst du\b|\bwas\b.*\bdu\b.*\b(sehen|siehst)\b|\bwas\b.*\bsiehst\b"
+                 r"|^(schau|guck|sieh|blick)( dich| mal)*( um| herum)?$|\bwas ist (vor dir|um dich|da vorne|vor dir los)\b"
+                 r"|\b(schau|guck|sieh) dich (mal )?um\b|\bbeschreib\w* (was du siehst|den raum|deine umgebung|das bild)\b"
+                 r"|\bwas ist (auf|in) (der|deiner) kamera\b", t):
         return "look", {}
-    if re.search(r"\bwhat (do|can) you see\b|\bwhat are you (looking at|seeing)\b|\blook around\b"
-                 r"|\bwhat('s| is) (in front of you|around you|there|ahead)\b|\bdescribe (what you see|the room|your surroundings|it)\b"
-                 r"|\bwhat('s| is) on the (camera|screen)\b", t):
-        return "look", {}
-    m = re.search(r"\b(?:can|do) you see (?:a |an |the |any |my )?(.+)", t)
+    m = re.search(r"\b(?:siehst|erkennst|findest) du (?:hier |gerade |irgendwo )?(.+)|\bkannst du (.+?) sehen\b", t)
     if m:
-        obj, color = _target(m.group(1))
+        obj, color = _target(m.group(1) or m.group(2))
         return "look", {"find": obj, "color": color}
 
     # --- following and turning to things ---
-    m = _order(t, r"follow|track|watch|keep an eye on|keep looking at")
-    if m:
-        obj, color = _target(t[m.end():])
-        return "track", {"target": obj, "color": color}
-    m = _order(t, r"look at|turn to|turn towards|turn toward|face")
-    if m:
-        rest = t[m.end():]
-        if not re.match(r"\s*(the )?(left|right)\b", rest):
+    if re.search(r"\b(schau|guck|sieh|blick)\w* (sie )?(mich|uns) an\b", t) and not QUESTION.match(t):
+        return "track", {"target": "person", "color": None}
+    m = re.search(r"\b(?:dreh|wend)\w* dich (?:zu|zur|zum|in richtung|nach) (.+)|\b(?:schau|guck|sieh|blick)\w* (?:zu|zur|zum|auf) (.+)", t)
+    if m and _request(t):
+        rest = m.group(1) or m.group(2)
+        if not re.match(r"(der |die |dem )?(links|rechts|linken|rechten)\b", rest):
             obj, color = _target(rest)
             if obj == "person":
                 return "track", {"target": "person", "color": None}
-            return "turn_to", {"target": obj, "color": color}
+            if obj:
+                return "turn_to", {"target": obj, "color": color}
+    m = re.search(r"\b(folg|folge|folgen|verfolg|verfolge|verfolgen|beobacht|beobachte|beobachten|follow)\b|\bbehalt\w* .* im auge\b", t)
+    if m and _request(t):
+        obj, color = _target(t[:m.start()] + " " + t[m.end():])
+        return "track", {"target": obj, "color": color}
 
     # --- speaker and motor levels ---
-    m = re.search(r"\bvolume\b.*?\b(\d{1,3})\b|\b(\d{1,3})\s*(?:percent|%)? volume\b", t)
+    m = re.search(r"\blautstärke\b.*?\b(\d{1,3})\b|\b(\d{1,3})\s*(?:prozent )?lautstärke\b", t)
     if m:
         return "volume", {"action": "ayarla", "level": int(m.group(1) or m.group(2))}
-    if re.search(r"\b(louder|speak up|volume up|turn (it|yourself|the volume|your volume) up|increase (the |your )?volume|raise (the |your )?volume)\b", t):
+    if re.search(r"\b(lauter|lautstärke (hoch|rauf|erhöhen)|(erhöh|dreh)\w* (die |deine )?lautstärke( hoch| auf)?|sprich lauter)\b", t):
         return "volume", {"action": "artır"}
-    if re.search(r"\b(quieter|softer|too loud|volume down|turn (it|yourself|the volume|your volume) down|lower (the |your )?(volume|voice)|decrease (the |your )?volume)\b", t):
+    if re.search(r"\b(leiser|zu laut|lautstärke (runter|herunter|verringern)|(verringer|senk|reduzier)\w* (die |deine )?lautstärke"
+                 r"|dreh\w* (die |deine )?lautstärke (runter|herunter))\b", t):
         return "volume", {"action": "azalt"}
-    if re.search(r"\b(what('s| is)|how loud is) (your|the) volume\b", t):
+    if re.search(r"\b(wie laut bist du|wie (hoch )?ist (deine|die) lautstärke|welche lautstärke)\b", t):
         return "volume", {"action": "sor"}
-    m = re.search(r"\b(?:motor|driving|drive) speed\b.*?\b(\d{1,3})\b", t)
+    m = re.search(r"\b(?:motor|fahr)?geschwindigkeit\b.*?\b(\d{1,3})\b", t)
     if m:
         return "motor_speed", {"action": "ayarla", "level": int(m.group(1))}
-    if re.search(r"\b(move|drive|go) (faster|quicker)( from now on)?$|\b(increase|raise) (the |your )?(motor )?speed\b", t):
+    if re.search(r"^(fahr|fahre|beweg dich) (ab jetzt |in zukunft )?schneller( ab jetzt| in zukunft)?$"
+                 r"|\b(erhöh|steiger)\w* (die |deine )?(motor|fahr)?geschwindigkeit\b", t):
         return "motor_speed", {"action": "artır"}
-    if re.search(r"\b(move|drive|go) slower( from now on)?$|\b(decrease|lower|reduce) (the |your )?(motor )?speed\b", t):
+    if re.search(r"^(fahr|fahre|beweg dich) (ab jetzt |in zukunft )?langsamer( ab jetzt| in zukunft)?$"
+                 r"|\b(verringer|senk|reduzier)\w* (die |deine )?(motor|fahr)?geschwindigkeit\b", t):
         return "motor_speed", {"action": "azalt"}
-    if re.search(r"\b(what('s| is)) (your|the) (motor |driving )?speed\b", t):
+    if re.search(r"\b(wie schnell (bist|fährst) du|wie (hoch )?ist (deine|die) (motor|fahr)?geschwindigkeit)\b", t):
         return "motor_speed", {"action": "sor"}
 
     # --- driving ---
-    if not QUESTION.match(t):
+    if _request(t):
         direction = None
-        if _order(t, r"turn|rotate|spin|go|move|drive|head|steer") or re.match(POLITE + r"(left|right)\b", t):
-            if re.search(r"\bleft\b", t):
+        # Parakeet recognises 25 languages and now and then writes a short German command in
+        # English ("Fahr vorwärts." -> "Far forwards."), so the English words count too
+        verb = re.search(r"\b(fahr|fahre|fahren|dreh|drehe|drehen|geh|gehe|gehen|beweg|bewege|bewegen|roll|rolle|rollen|"
+                         r"lenk|lenke|lenken|steuer|steuere|steuern|wend|wende|wenden|setz|setze|setzen|schau|guck|"
+                         r"far|go|turn|drive|move)\b", t)
+        # Short orders whose verb was lost or misheard: "Nach links!", "Rehen Sie nach links."
+        alone = len(t.split()) <= 5 and re.search(r"\b(nach (links|rechts|vorne|vorn|hinten)|vorwärts|rückwärts|geradeaus)\b"
+                                                  r"|^(links|rechts|zurück|vor|vorne)\b", t)
+        if verb or alone:
+            if re.search(r"\b(links|linksrum|left)\b", t):
                 direction = "sol"
-            elif re.search(r"\bright\b", t) and not re.search(r"\bright (now|away)\b", t):
+            elif re.search(r"\b(rechts|rechtsrum|right)\b", t):
                 direction = "sag"
-        # "Come back" / "come here" said to a robot means "come to me": drive toward the user
-        if not direction and _order(t, r"come"):
-            direction = "ileri"
-        if not direction and (_order(t, r"go|move|drive|roll|head|forward|ahead|straight|onward")):
-            if re.search(r"\b(back|backward|backwards|reverse)\b", t):
+            elif re.search(r"\b(rückwärts|zurück|nach hinten|retour|back|backward|backwards)\b", t):
                 direction = "geri"
-            elif re.search(r"\b(forward|forwards|ahead|straight|onward)\b", t):
+            elif re.search(r"\b(vorwärts|vor|vorne|vorn|geradeaus|weiter|forward|forwards|ahead|straight)\b", t):
                 direction = "ileri"
-        if not direction and _order(t, r"back up|back off|reverse|go back|move back|backward|backwards"):
-            direction = "geri"
+        # "Komm zurück" / "komm her" said to a robot means "come to me": drive toward the user
+        if _order(t, r"komm|komme|kommen|come"):
+            direction = "ileri"
         if direction:
             return "move", {"direction": direction, "seconds": _seconds(t), "speed": _speed(t)}
 
     # --- the robot's own body ---
-    sections = [("isi", r"\b(temperature|how hot|hot are you|warm|overheat\w*)\b"),
-                ("cpu", r"\b(cpu|processor|load)\b"), ("ram", r"\b(memory usage|ram)\b"),
-                ("guc", r"\b(battery|power supply|voltage|undervolt\w*)\b"), ("disk", r"\b(disk|storage)\b"),
-                ("ag", r"\b(wifi|wi fi|network|internet connection|signal|ip address)\b")]
-    if re.search(r"\b(you|your)\b", t) or re.search(r"\bstatus\b", t):
+    sections = [("isi", r"\b(temperatur(?! (in|draußen|morgen))|wie heiß|wie warm|heiß|warm|überhitz\w*)\b"),
+                ("cpu", r"\b(cpu|prozessor\w*|auslastung|last)\b"), ("ram", r"\b(arbeitsspeicher|ram|speicherauslastung)\b"),
+                ("guc", r"\b(akku|batterie|stromversorgung|netzteil|spannung|unterspannung)\b"),
+                ("disk", r"\b(festplatte|speicherplatz|sd karte|disk)\b"),
+                ("ag", r"\b(wlan|wifi|wi fi|netzwerk|internetverbindung|signal|ip adresse)\b")]
+    if re.search(r"\b(du|dein|deine|deinen|deiner|deinem|dir|dich)\b", t) or re.search(r"\bstatus\b", t):
         for section, pattern in sections:
             if re.search(pattern, t):
                 return "body_status", {"section": section}
-        if re.search(r"\bhow (are you feeling|do you feel)\b|\b(status report|system status|self check|health check)\b", t):
+        if re.search(r"\bwie geht es dir\b|\bwie geht's dir\b|\bwie fühlst du dich\b"
+                     r"|\b(statusbericht|systemstatus|selbsttest|status)\b", t):
             return "body_status", {"section": "ozet"}
 
     # --- face ---
-    m = re.search(r"\b(?:look|be|show me (?:a |your )?|make a) (happy|sad|surprised|shocked|angry|mad|sleepy|tired|neutral|normal)\b"
-                  r"|^(?:please )?(smile)\b", t)
+    m = re.search(r"\b(?:sei|schau|guck|sieh)\w* (?:mal )?(?:ganz |so )?" + EMOTION_RE + r"(?: aus)?\b"
+                  r"|\b(?:zeig|mach)\w* (?:mir )?(?:mal )?(?:ein|dein)\w* " + EMOTION_RE + r" gesicht\b"
+                  r"|^(?:bitte )?(lächle|lächeln|lach)\b", t)
     if m and not QUESTION.match(t):
-        return "express", {"emotion": EMOTIONS[m.group(1) or m.group(2)]}
+        word = next(g for g in m.groups() if g)
+        return "express", {"emotion": EMOTIONS[word]}
 
     # --- memory ---
-    m = re.match(POLITE + r"(?:remember|note|keep in mind|don't forget) (?:that )?(.+)", t)
-    if m and not re.match(r"(what|when|where|who|me|my name)\b", m.group(1)):
-        # Keep the speaker's capitals (names) from the original text
-        o = re.search(r"(?:remember|note|keep in mind|don't forget)\s+(?:that\s+)?(.+)", text, re.I)
-        return "remember", {"text": _third_person(o.group(1) if o else m.group(1))}
-    m = re.match(r"^(?:my (?:name|birthday|favou?rite [a-z]+|[a-z]+'s name|[a-z]+ is called)|i live in|i am from|i'm from|i work as|i work at)\b.*", t)
-    if m:
-        return "remember", {"text": _third_person(text)}
-    m = re.match(POLITE + r"forget (?:that |about |what i said about )?(.+)", t)
+    m = re.match(POLITE + r"(?:merk dir|merke dir|vergiss nicht|denk daran|denke daran|notier dir|notiere)\b,? ?(?:dass )?(.+)", t)
+    if m and not re.match(r"(was|wann|wo|wer|mich|meinen namen)\b", m.group(1)):
+        return "remember", {"text": fact(text)}
+    if re.match(r"^(?:mein name ist|mein geburtstag|meine? lieblings\w+|meine? \w+ heißt|meine? \w+ ist|ich heiße|ich wohne in|"
+                r"ich lebe in|ich komme aus|ich bin aus|ich arbeite als|ich arbeite bei)\b", t) \
+            and not re.match(r"^meine? \w+ ist (das|es|so|sehr|nicht|kaputt)\b", t):
+        return "remember", {"text": fact(text)}
+    m = re.match(POLITE + r"vergiss (?:das mit |alles über |was ich über )?(.+?)(?: gesagt habe)?$", t)
     if m:
         return "forget", {"query": m.group(1)}
-    m = re.search(r"\bwhat do you (?:remember|know) about (.+)|\bdo you remember (.+)|\bwhere (?:is|are|did i (?:put|leave)) my (.+)"
-                  r"|\bwhat(?:'s| is) my (.+)|\bwho am i\b|\bwhat did we (?:talk|speak) about\b", t)
+    m = re.search(r"\bwas weißt du (?:noch )?über (.+)|\berinnerst du dich an (.+)|\bwo (?:sind|ist|habe ich|hab ich) meine?n? (.+?)"
+                  r"(?: hingelegt| gelassen| gelegt)?$|\bwie (?:heißt|ist) meine?r? (.+)|\bwer bin ich\b|\bwie heiße ich\b"
+                  r"|\bworüber haben wir (?:gesprochen|geredet)\b", t)
     if m:
-        query = next((g for g in m.groups() if g), None) or ("name" if "who am i" in t else "talk")
-        return "recall", {"query": query}
+        query = next((g for g in m.groups() if g), None) or ("heiße name" if re.search(r"wer bin ich|wie heiße ich", t) else "gesprochen")
+        return "recall", {"query": re.sub(r"^(name|vorname)$", "heiße name", query)}
 
     # --- information ---
-    if re.search(r"\b(weather|forecast|raining|rain|snow\w*|umbrella|temperature outside|how (hot|cold) is it)\b", t):
-        place = re.search(r"\b(?:in|for|at) ([a-z][a-z .'-]+?)(?: today| tomorrow| this week| now)?$", t)
-        days = 2 if "tomorrow" in t else 7 if re.search(r"\b(this week|week)\b", t) else 1
+    if re.search(r"\b(wetter|wettervorhersage|vorhersage|regnet|regnen|regen|schnee\w*|schneit|regenschirm|gewitter"
+                 r"|temperatur draußen|wie (warm|kalt|heiß) (ist|wird) es)\b", t):
+        place = re.search(r"\b(?:in|für) ([a-zäöüß][a-zäöüß .'-]+?)(?: heute| morgen| übermorgen| diese woche| jetzt| gerade)*$", t)
+        days = 2 if re.search(r"\bmorgen\b", t) else 7 if re.search(r"\b(diese woche|woche)\b", t) else 1
         return "weather", {"place": place.group(1).strip() if place else None, "days": days}
-    if re.search(r"\bwhat time is it\b|\bwhat('s| is) the time\b|\bwhat (day|date) is (it|today)\b|\bwhat('s| is) (the date|today's date)\b", t):
+    if re.search(r"\bwie spät ist es\b|\bwie viel uhr\b|\bwieviel uhr\b|\bwelche uhrzeit\b|\bwelcher tag ist (es|heute)\b"
+                 r"|\bwelches datum\b|\bder wievielte\b|\bden wievielten\b", t):
         return "time", {}
-    m = re.match(POLITE + r"(?:look up|search for|search|google|wikipedia|find out about) (.+)", t) \
-        or re.match(r"^who (?:is|was) (.+)", t)
+    m = re.match(POLITE + r"(?:such nach|suche nach|schlag|schlage|google|wikipedia|recherchiere) (.+?)(?: nach)?$", t) \
+        or re.match(r"^wer (?:ist|war) (?!du\b|das\b|da\b|dein\b|deine\b)(.+)", t)
     if m:
         return "wiki", {"query": m.group(1)}
 

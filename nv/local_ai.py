@@ -1,4 +1,4 @@
-"""Local AI services: Qwen (llama-server), Whisper (whisper-server) and Piper, all on the Pi.
+"""Local AI services: Qwen (llama-server), Parakeet (nv/parakeet_server.py) and Piper, all on the Pi.
 
 The two servers run as child processes and are stopped with the robot. Settings live in
 config.toml [local]; numbers in comments were measured on a Pi 4 (4 GB, Cortex-A72).
@@ -10,7 +10,9 @@ import json
 import logging
 import re
 import subprocess
+import sys
 import time
+import unicodedata
 import urllib.request
 import uuid
 import wave
@@ -26,7 +28,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 class Servers:
-    """Starts llama-server and whisper-server; both load while the robot opens its hardware."""
+    """Starts llama-server and the Parakeet server; both load while the robot opens its hardware."""
 
     def __init__(self, cfg: dict, log_dir: Path):
         self._cfg = cfg
@@ -46,21 +48,21 @@ class Servers:
             # One slot: the system prompt is read once and reused from the cache
             "-np", "1", "--host", "127.0.0.1", "--port", str(c["llm_port"]),
         ])
+        # Parakeet answers like whisper-server (same /inference, same fields); it needs no VAD
+        # pass of its own: SpeechGate already cut the speech out
         self._spawn("stt", [
-            c["whisper_server"], "-m", c["stt_model"], "-l", c["language"],
-            "-t", str(c["stt_threads"]), "-nt",
-            # Greedy decoding and a ~10 s window: 3x faster than beam 3 + 30 s, no accuracy loss
-            "-bs", "1", "-bo", "1", "-ac", "512",
-            "--vad", "-vm", c["stt_vad_model"], "-vt", "0.50", "-vsd", "500",
-            "--host", "127.0.0.1", "--port", str(c["stt_port"]),
-        ])
+            sys.executable, "-m", "nv.parakeet_server", "--lib", c["parakeet_lib"], "--model", c["stt_model"],
+            "--threads", str(c["stt_threads"]), "--port", str(c["stt_port"]),
+        ], need=(c["parakeet_lib"], c["stt_model"]))
 
-    def _spawn(self, name: str, args: list[str]) -> None:
-        if not Path(args[0]).exists() or not Path(args[2]).exists():
-            raise FileNotFoundError(f"{name}: {args[0]} or {args[2]} is missing (see config.toml [local])")
+    def _spawn(self, name: str, args: list[str], need: tuple[str, ...] = ()) -> None:
+        for path in need or (args[0], args[2]):
+            if not Path(path).exists():
+                raise FileNotFoundError(f"{name}: {path} is missing (see config.toml [local])")
         out = open(self._log_dir / f"{name}-server.log", "w")
-        self._procs.append(subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT))
-        log.info("%s server starting: %s", name, Path(args[2]).name)
+        self._procs.append(subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT,
+                                            cwd=Path(__file__).resolve().parent.parent))
+        log.info("%s server starting: %s", name, Path(need[-1] if need else args[2]).name)
 
     async def wait_ready(self, which: tuple[str, ...] = ("STT", "LLM"), timeout: float = 120) -> None:
         c = self._cfg
@@ -92,11 +94,10 @@ class Servers:
 
 
 class SpeechToText:
-    """Whisper over HTTP, audio sent from memory. Returns (text, confidence).
+    """Parakeet over HTTP (whisper-server's interface), audio sent from memory. Returns (text, confidence).
 
-    confidence is the lowest segment avg_logprob: ~0 is certain; below about -0.5 words are
-    often guessed. No prompt on purpose: a prompt full of commands made Whisper turn unclear
-    speech into those commands and sometimes repeat it in a loop for 6-11 s.
+    confidence is the lowest segment mean token log-probability: ~0 is certain. On the robot
+    microphone correct German sentences scored -0.00 to -0.16, misheard ones -0.8 to -1.0.
     """
 
     def __init__(self, cfg: dict):
@@ -130,7 +131,7 @@ class SpeechToText:
 
 
 def dedupe(text: str) -> str:
-    """Whisper sometimes repeats a sentence ("Is it on? Is it on? Is it on?"): keep one."""
+    """A recogniser sometimes repeats a sentence ("Is it on? Is it on? Is it on?"): keep one."""
     out: list[str] = []
     for sentence in SENTENCE_END.split(text):
         if not out or sentence.lower().strip(" .!?") != out[-1].lower().strip(" .!?"):
@@ -198,8 +199,27 @@ class TextToSpeech:
     def __init__(self, model: str):
         from piper import PiperVoice
         self._voice = PiperVoice.load(model)
+        self._voice.phonemize = self._joined(self._voice.phonemize, self._voice.config.phoneme_id_map)
         self._rate = self._voice.config.sample_rate
         log.info("voice loaded: %s (%d Hz)", Path(model).name, self._rate)
+
+    @staticmethod
+    def _joined(phonemize, known: dict):
+        """This Piper splits "ç" (German "ich", "nicht") into "c" and a combining cedilla that the
+        voices do not know, so "ich" was spoken "ick". Such pairs are joined again."""
+        def run(text: str) -> list[list[str]]:
+            out = []
+            for sentence in phonemize(text):
+                joined: list[str] = []
+                for p in sentence:
+                    c = unicodedata.normalize("NFC", joined[-1] + p) if joined and unicodedata.combining(p) else None
+                    if c in known:
+                        joined[-1] = c
+                    else:
+                        joined.append(p)
+                out.append(joined)
+            return out
+        return run
 
     async def synth(self, text: str) -> bytes:
         return await asyncio.to_thread(self._synth, text)
