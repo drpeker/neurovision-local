@@ -142,7 +142,7 @@ class Actions:
             found = [d for d in found if d.name == target and (not color or color in d.colors)]
         return found
 
-    async def _look(self, find: str | None = None, color: str | None = None) -> str:
+    async def _look(self, find: str | None = None, color: str | None = None, me: bool = False) -> str:
         if not self._camera:
             return "I don't have a camera."
         if not self.detector:
@@ -155,6 +155,14 @@ class Actions:
         if not find:
             return seen
         hits = [d for d in found if d.name == find and (not color or color in d.colors)]
+        if me:
+            # The detector knows objects and colours, not faces or clothes: say what it really sees
+            others = describe([d for d in found if d.name != "person"])
+            if not hits:
+                return "No, I don't see you right now."
+            you = max(hits, key=lambda d: d.conf)
+            rest = f" {others[0].upper()}{others[1:]}" if not others.startswith("I don't") else ""
+            return f"I can see you {_where(you.cx)}.{rest} I recognise objects and colours, not faces or clothes."
         if hits:
             return f"Yes, I can see {'it' if len(hits) == 1 else 'them'} {_where(hits[0].cx)}."
         return f"No, I don't see a {COLOR_WORDS.get(color, '')} {find} right now.".replace("  ", " ")

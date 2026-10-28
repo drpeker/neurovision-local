@@ -122,6 +122,9 @@ def route(text: str) -> tuple[str, dict]:
             return "shutdown", {"target": "robot"}
 
     # --- vision (questions are allowed here) ---
+    # The LLM cannot see: asked to describe the user it made up eyes and posture for 30 s
+    if re.search(r"\bdescribe (me|myself|us)\b|\bwhat do i look like\b|\bhow do i look\b", t):
+        return "look", {"find": "person", "color": None, "me": True}
     # Whisper often drops "do" ("What you see at the moment?"); the LLM then got the question and
     # made up a scene, so anything asking what the robot sees is a look
     if re.search(r"\bwhat\b.*\b(you|u) (see|seeing)\b|\b(tell|show) me what you see\b|^look( around)?$"
@@ -134,6 +137,8 @@ def route(text: str) -> tuple[str, dict]:
     m = re.search(r"\b(?:can|do) you see (?:a |an |the |any |my )?(.+)", t)
     if m:
         obj, color = _target(m.group(1))
+        if re.match(r"(me|us)\b", m.group(1)):
+            return "look", {"find": "person", "color": None, "me": True}
         return "look", {"find": obj, "color": color}
 
     # --- following and turning to things ---

@@ -209,7 +209,8 @@ class LanguageModel:
 
         self.timings = {}
         answer, cut = await asyncio.to_thread(run)
-        self._last = (text, answer, time.monotonic()) if answer else None
+        # Only the first sentence is kept: a long answer read again cost 13 s on the next question
+        self._last = (text, SENTENCE_END.split(answer)[0].strip(), time.monotonic()) if answer else None
         return answer, cut
 
 
