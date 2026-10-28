@@ -1,0 +1,53 @@
+"""Router check: python -m tests.test_router (from the project folder)."""
+
+from nv.router import route
+
+CASES = [
+    ("Stop!", "stop", {}), ("Stop following me.", "stop", {}), ("Please stop.", "stop", {}), ("Wait.", "stop", {}), ("Top!", "stop", {}), ("Stopped.", "stop", {}),
+    ("Top ten movies?", "chat", {}),
+    ("Go forward.", "move", {"direction": "ileri", "seconds": 1.0}),
+    ("Move forward a little.", "move", {"direction": "ileri", "seconds": 0.3}),
+    ("Go back slowly.", "move", {"direction": "geri", "speed": "yavaş"}),
+    ("Back up a bit.", "move", {"direction": "geri", "seconds": 0.3}),
+    ("Turn left.", "move", {"direction": "sol"}), ("Can you turn right please?", "move", {"direction": "sag"}),
+    ("Turn right for two seconds.", "move", {"direction": "sag", "seconds": 2}),
+    ("Drive forward very slowly for 1.5 seconds.", "move", {"direction": "ileri", "seconds": 1.5, "speed": "çok yavaş"}),
+    ("How do I turn left at the next street?", "chat", {}), ("What is right and wrong?", "chat", {}),
+    ("Follow me.", "track", {"target": "person"}), ("Track the red cup.", "track", {"target": "cup", "color": "kırmızı"}),
+    ("Follow the blue thing.", "track", {"target": "colored object", "color": "mavi"}),
+    ("Watch the cat.", "track", {"target": "cat"}), ("Look at me.", "track", {"target": "person"}),
+    ("Turn to the bottle.", "turn_to", {"target": "bottle"}), ("Face the laptop.", "turn_to", {"target": "laptop"}),
+    ("What do you see?", "look", {}), ("What's in front of you?", "look", {}),
+    ("Do you see a phone?", "look", {"find": "cell phone"}), ("Can you see the orange?", "look", {"find": "orange"}),
+    ("Louder please.", "volume", {"action": "artır"}), ("Set the volume to 40.", "volume", {"action": "ayarla", "level": 40}),
+    ("Turn the volume down.", "volume", {"action": "azalt"}), ("What's your volume?", "volume", {"action": "sor"}),
+    ("Set motor speed to 60.", "motor_speed", {"level": 60}), ("Move slower from now on.", "motor_speed", {"action": "azalt"}),
+    ("How hot are you?", "body_status", {"section": "isi"}), ("What's your CPU load?", "body_status", {"section": "cpu"}),
+    ("How are you feeling?", "body_status", {"section": "ozet"}), ("How is your wifi signal?", "body_status", {"section": "ag"}),
+    ("Smile!", "express", {"emotion": "mutlu"}), ("Look surprised.", "express", {"emotion": "şaşkın"}),
+    ("Remember that my keys are in the blue bowl.", "remember", {"text": "The user's keys are in the blue bowl."}),
+    ("My daughter's name is Elif.", "remember", {"text": "The user's daughter's name is Elif."}),
+    ("I live in Izmir.", "remember", {"text": "The user lives in Izmir."}),
+    ("Forget about my keys.", "forget", {"query": "my keys"}),
+    ("Where are my keys?", "recall", {"query": "keys"}), ("What's my daughter's name?", "recall", {}),
+    ("What do you remember about Elif?", "recall", {"query": "elif"}), ("Who am I?", "recall", {}),
+    ("What's the weather like?", "weather", {"place": None}), ("Will it rain tomorrow in Ankara?", "weather", {"days": 2}),
+    ("What's the weather in Izmir?", "weather", {"place": "izmir"}),
+    ("What time is it?", "time", {}), ("Who was Albert Einstein?", "wiki", {"query": "albert einstein"}),
+    ("Look up black holes.", "wiki", {"query": "black holes"}),
+    ("Shut down the system.", "shutdown", {"target": "sistem"}), ("Turn yourself off.", "shutdown", {"target": "robot"}),
+    ("Go on.", "chat", {}), ("I have a dog named Max.", "chat", {}),
+    ("Remember that I have a dog named Max.", "remember", {"text": "The user has a dog named Max."}),
+    ("Tell me the capital city of Finland.", "chat", {}), ("Tell me a joke.", "chat", {}),
+    ("Why is the sky blue?", "chat", {}), ("What is your name?", "chat", {}), ("Turn off the lights.", "chat", {}),
+    ("I am happy today.", "chat", {}), ("The right answer is four.", "chat", {}),
+]
+
+bad = 0
+for text, tool, expect in CASES:
+    got_tool, args = route(text)
+    ok = got_tool == tool and all(args.get(k) == v for k, v in expect.items())
+    bad += not ok
+    if not ok:
+        print(f"BAD {text!r:48} -> {got_tool} {args}   (want {tool} {expect})")
+print(f"{len(CASES) - bad}/{len(CASES)} correct")

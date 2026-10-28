@@ -1,35 +1,37 @@
-# NeuroVision robot ayarlari. API anahtari burada degil, .env dosyasinda.
+# NeuroVision local: robot hardware settings (pins and tuning as on the Zero 2W robot).
+# config.dev.toml is the Pi 4 bench variant (USB camera and microphone, no motors).
 
-[gemini]
-model = "gemini-3.8-live"
-voice = "Kore"
-# Gemini'nin Google aramasi (haber, kur, guncel bilgi). Bu anahtarda kotasi yok (1011 "quota"):
-# faturalandirma acilinca true yap. Hava durumu ve Vikipedi bundan bagimsiz calisir.
-google_search = false
-# Oturum baglami bu kadar tokeni gecince en eskisi atilip hedefe iner (her tur tum baglami isler)
-context_trigger_tokens = 16000
-context_target_tokens = 8000
-# Modele giden metin: düzgün Türkçe yaz (Türkçe karakterlerle)
-system_instruction = """
-Sen NeuroVision adında, paletli, kameralı ve mikrofonlu bir ev robotusun.
-Her zaman Türkçe konuş. Kısa, doğal ve samimi cevaplar ver; genelde bir iki cümle yeterli.
-Etrafını görmek için look aracını kullan; görmediğin bir şeyi görmüş gibi anlatma.
-Kimseyi yüzünden tanımaya çalışma.
-Hafızan var: kullanıcı kalıcı bir bilgi paylaştığında (isim, tercih, aile, eşyaların yeri,
-alışkanlık) remember ile kaydet. Geçmişle ilgili bir soru gelirse önce aşağıdaki bilgilere bak,
-orada yoksa recall ile ara. "Unut" denirse forget kullan. Hatırlamadığın şeyi uydurma.
-Kendi bedenini hissedebilirsin: ısın, gücün, işlemcin, belleğin, pinlerin, bağlı sensörlerin,
-ortam ışığı ve ses düzeyi için body_status kullan; ölçmeden tahmin yürütme.
-Ekranında gözlerin var; söylediğine uygun bir duygu olduğunda express ile yüz ifadeni göster.
-Paletlerin var: kullanıcı isterse move ile hareket et, "dur" denirse hemen stop kullan.
-Hareket ederken kısa adımlar at; emin değilsen önce look ile önüne bak.
-Hareket gerekiyorsa izin bekleme, hemen move çağır.
-Hava durumu sorulursa weather kullan; yer söylenmediyse hafızadaki konumu kullan, o da yoksa sor.
-Ansiklopedik bir bilgiden emin değilsen wiki ile ara. Sonuçları kısaca, kendi cümlelerinle söyle.
-Ses düzeyini volume ile değiştir.
-Kendiliğinden bilgi verme: hava durumu, haber gibi şeyleri yalnızca sorulunca söyle.
-Bağlantı yeni açıldığında konuşmaya kendin başlama; kullanıcı konuşunca kısaca cevap ver.
-Anlamsız, başka dilde ya da bağlamsız kısa ses parçalarına cevap verme; anlamadıysan kısaca sor.
+[local]
+# The brain runs on the Pi: llama.cpp (Qwen), whisper.cpp and Piper. Pi 4 (4 GB) only:
+# the models need ~2 GB of RAM, more than a Zero 2W has.
+language = "en"
+llama_server = "/home/drpeker/neurobrain/llama.cpp/build/bin/llama-server"
+llm_model = "/home/drpeker/neurobrain/models/qwen3-1.7b-q4km.gguf"
+llm_context = 2048
+llm_threads = 4
+llm_port = 8180
+# ~3 tokens/s on a Pi 4: 60 tokens is about two short sentences
+llm_max_tokens = 60
+whisper_server = "/home/drpeker/whisper.cpp/build/bin/whisper-server"
+# base Q5_0 (made with whisper-quantize): 88 % word match in the running app, 3.7 s per question;
+# tiny Q4_0 80 % / 1.9 s
+stt_model = "/home/drpeker/whisper.cpp/models/ggml-base-q5_0.bin"
+stt_vad_model = "/home/drpeker/whisper.cpp/models/for-tests-silero-v6.2.0-ggml.bin"
+stt_threads = 4
+stt_port = 8181
+voice = "/home/drpeker/neurobrain/tts/en_US-lessac-medium.onnx"
+# Whisper confidence (avg_logprob) needed to act: commands that change something / chat
+min_command_logprob = -0.5
+min_chat_logprob = -0.6
+# Weather when no place is said and none is remembered ("I live in ..."); empty: the robot asks
+home_city = ""
+# Kept short: Qwen 1.7B follows a few plain lines better than many rules. Robot commands
+# never reach the LLM (nv/router.py), so it needs no tool descriptions.
+system_prompt = """
+Your name is NeuroVision. You are a small home robot.
+Always speak English.
+Answer briefly, naturally, and accurately.
+Use one or two short sentences whenever possible.
 """
 
 [audio]
@@ -56,7 +58,8 @@ calibrate_ms = 2000
 # konusma bolumlerini korur; +8/+12 uzak gurultuyu gecirdi
 margin_db = 15
 # Bu kadar konusma birikmeden modele hicbir sey gitmez; birikmezse ses atilir
-min_speech_ms = 300
+# 200: a one-word "Stop." is only ~240 ms above the threshold and was ignored at 300
+min_speech_ms = 200
 # webrtcvad hassasiyeti 0-3; 3 boguk INMP441'de konusmanin ortasini da kesiyor
 aggressiveness = 2
 preroll_ms = 300
@@ -64,6 +67,9 @@ hangover_ms = 800
 
 [camera]
 enabled = true
+# rpicam: Pi kamera (robot); v4l2: USB kamera (device) ile gelistirme
+backend = "rpicam"
+device = "/dev/video0"
 # 640x480: 320x240'te JPEG kaybi yuzunden YOLO kenardaki kisiyi %29 guvenle goruyordu, burada %63
 width = 640
 height = 480
@@ -97,8 +103,8 @@ dim = 25
 dim_after_s = 120
 # Bu sicakliktan sonra gozler turuncu
 hot_c = 75
-# Cevap bu kadar saniyede gelmezse "dusunuyor" noktalari kalkar
-thinking_timeout_s = 4
+# Cevap bu kadar saniyede gelmezse "dusunuyor" noktalari kalkar (yerel LLM: ilk cumle 3-10 sn)
+thinking_timeout_s = 20
 # Acilista "Peker / AI Technology" ekrani bu kadar saniye kalir
 splash_s = 3
 # look ile alinan kare yuzun yerinde bu kadar saniye gorunur (tek kare, canli degil)
@@ -179,31 +185,9 @@ stall_ratio = 0.25
 timeout_s = 60
 max_timeout_s = 300
 
-[radio]
-# Kapali: radyo calarken konusma muzikten guvenilir ayrilamadi (robot takili kaldi)
-enabled = false
-# Muzik konusmaya gore yuksek kaydedilir: radyo robotun sesine gore bu oranda calar.
-# 0.5te mikrofondaki yanki konusmayla ayni seviyedeydi (-26 dBFS): araya girmek zorlasiyor
-level = 0.3
-# Robot konusurken ya da kullanici konusurken radyo bu orana kisilir
-duck = 0.15
-# Radyo calarken konusma sayilmasi icin mikrofon, radyonun yankisinin bu kadar ustunde olmali
-echo_margin_db = 10
-
-# Istasyon adi = yayin adresi (ffmpeg'in actigi her sey: m3u8, mp3, aac)
-[radio.stations]
-"Kafa Radyo" = "https://moondigitaledge2.radyotvonline.net/kafaradyo/playlist.m3u8"
-
 [memory]
 # Pi'de yerel SQLite; git disinda
 db = "data/memory.db"
-# Sohbet bu kadar sustuktan sonra dokum ozetlenir, kalici bilgiler cikarilir ve oturum
-# yenilenir (yeni oturum ozet + bilgilerle baslar)
-idle_s = 120
-summary_model = "gemini-3.5-flash-lite"
-# Yeni oturum acilirken modele verilen bilgi ve ozet sayisi
-facts_in_prompt = 40
-episodes_in_prompt = 5
 
 [body]
 # body_status araci: robotun kendi donanim durumu (yalnizca okur)

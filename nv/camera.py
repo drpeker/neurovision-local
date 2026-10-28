@@ -1,5 +1,8 @@
 """Pi kamera: rpicam-vid MJPEG akisindan son JPEG kareyi ve kare meta verisini tutar.
 
+neurovision-local: backend = "v4l2" ayni MJPEG akisini ffmpeg ile bir USB kameradan (C270)
+alir; Pi 4'te robot donanimi takili degilken gelistirme icin. Isik meta verisi yalnizca rpicam'da.
+
 Meta veri (libcamera'nin lux tahmini, pozlama, kazanc) bir FIFO uzerinden okunur;
 ek kutuphane ya da buyuyen dosya yok.
 """
@@ -20,7 +23,14 @@ META_KEYS = {"Lux": "lux", "ExposureTime": "exposure_us", "AnalogueGain": "gain"
 
 
 class Camera:
-    def __init__(self, width: int, height: int, fps: int, rotation: int = 0, hflip: bool = False):
+    def __init__(self, width: int, height: int, fps: int, rotation: int = 0, hflip: bool = False,
+                 backend: str = "rpicam", device: str = "/dev/video0"):
+        self._backend = backend
+        self._v4l2_args = [
+            "-hide_banner", "-loglevel", "error", "-f", "v4l2", "-input_format", "mjpeg",
+            "-video_size", f"{width}x{height}", "-framerate", str(fps), "-i", device,
+            "-c", "copy", "-f", "mjpeg", "-",
+        ]
         runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
         self._fifo = runtime / f"nv-camera-meta-{os.getpid()}"
         # rpicam yalnizca 0/180 dondurur; 90/270 (yan takili kamera) kare istendiginde PIL ile
@@ -43,6 +53,14 @@ class Camera:
         self.meta_at = 0.0
 
     async def start(self) -> None:
+        if self._backend == "v4l2":
+            exe = shutil.which("ffmpeg")
+            if not exe:
+                log.warning("ffmpeg bulunamadi, kamera kapali")
+                return
+            self._args = self._v4l2_args
+            self._task = asyncio.create_task(self._supervise(exe), name="camera")
+            return
         exe = shutil.which("rpicam-vid")
         if not exe:
             log.warning("rpicam-vid bulunamadi, kamera kapali")

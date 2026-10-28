@@ -9,7 +9,7 @@ Before=user@1000.service
 Type=oneshot
 User=drpeker
 Environment=HOME=/home/drpeker
-ExecStart=/home/drpeker/projects/neurovision-updated/.venv/bin/python /home/drpeker/projects/neurovision-updated/deploy/boot/boot_splash.py
+ExecStart=/home/drpeker/projects/neurovision-local/.venv/bin/python /home/drpeker/projects/neurovision-local/deploy/boot/boot_splash.py
 TimeoutStartSec=20
 
 [Install]

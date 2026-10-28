@@ -1,11 +1,12 @@
 [Unit]
-Description=NeuroVision robot (Gemini Live)
+Description=NeuroVision local robot (on-device Qwen, Whisper, Piper)
+Conflicts=neurovision.service
 After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=%h/projects/neurovision-updated
-ExecStart=%h/projects/neurovision-updated/.venv/bin/python robot.py
+WorkingDirectory=%h/projects/neurovision-local
+ExecStart=%h/projects/neurovision-local/.venv/bin/python robot.py
 Restart=on-failure
 RestartSec=5
 # Log dosyasi zaten logs/robot.log; journal'a da duser
