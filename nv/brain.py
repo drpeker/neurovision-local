@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 # Whisper avg_logprob below these: the words were probably guessed (measured on the C270 and
 # a speaker test set). Commands that change something are not run on a guess; chat asks again.
-GUARDED = {"move", "track", "turn_to", "remember", "forget", "volume", "motor_speed", "shutdown", "express"}
+GUARDED = {"move", "track", "turn_to", "remember", "forget", "volume", "mic", "motor_speed", "shutdown", "express"}
 # Not undoable: these need the stricter min_risky_logprob
 RISKY = {"shutdown", "forget"}
 NOTES_MAX_AGE = 120  # s; what the robot last saw is given to the LLM for this long
@@ -55,6 +55,7 @@ class LocalBrain:
         self.body.speaker = speaker
         self.actions = Actions(cfg, camera, memory, self.body, speaker)
         self.actions.wait_spoken = self._wait_spoken
+        self.actions.gate = self.gate
         self._stt = SpeechToText(local)
         self._llm = LanguageModel(local, local["system_prompt"].strip())
         self._tts = TextToSpeech(local["voice"])

@@ -36,6 +36,9 @@ EMOTIONS = {"happy": "mutlu", "smile": "mutlu", "sad": "üzgün", "surprised": "
             "normal": "nötr"}
 
 NUMBERS = {"half a": 0.5, "a half": 0.5, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+# Levels heard as words ("microphone level two forty percent")
+TENS = {"ten": 10, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+        "eighty": 80, "ninety": 90, "hundred": 100}
 
 # A request may be polite ("can you turn left?"); a question about something is not a command
 POLITE = r"^(?:hey |ok |okay |please |now |neurovision |robot )*(?:can you |could you |would you |will you )?(?:please )?"
@@ -155,7 +158,20 @@ def route(text: str) -> tuple[str, dict]:
                 return "track", {"target": "person", "color": None}
             return "turn_to", {"target": obj, "color": color}
 
-    # --- speaker and motor levels ---
+    # --- speaker, microphone and motor levels ---
+    # A question about the levels: both are answered from the real settings (Qwen does not know them)
+    if (QUESTION.match(t) or t.startswith(("say ", "check "))) and re.search(r"\b(volume|level|levels|gain)\b", t) \
+            and re.search(r"\b(microphone|mic|speaker|sound|audio|system|levels)\b", t):
+        return "levels", {}
+    if re.search(r"\b(microphone|mic)\b", t):
+        m = re.search(r"\b(\d{1,3})\b", t) or re.search(r"\b(" + "|".join(TENS) + r")\b", t)
+        if m:
+            level = int(m.group(1)) if m.group(1).isdigit() else TENS[m.group(1)]
+            return "mic", {"action": "ayarla", "level": level}
+        if re.search(r"\b(up|louder|higher|more|increase|raise|boost)\b", t):
+            return "mic", {"action": "artır"}
+        if re.search(r"\b(down|quieter|lower|less|decrease|reduce)\b", t):
+            return "mic", {"action": "azalt"}
     m = re.search(r"\bvolume\b.*?\b(\d{1,3})\b|\b(\d{1,3})\s*(?:percent|%)? volume\b", t)
     if m:
         return "volume", {"action": "ayarla", "level": int(m.group(1) or m.group(2))}

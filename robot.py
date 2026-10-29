@@ -101,6 +101,8 @@ async def run(cfg: dict) -> None:
     log.info("memory: %s", memory.count())
     a = cfg["audio"]
     volume = int(memory.get("volume") or a["volume"])  # a spoken volume change is kept
+    if a.get("card") and memory.get("mic_boost_db"):
+        set_mic_boost(int(memory.get("mic_boost_db")), a["card"])  # so is a spoken microphone change
     mic = Mic(a["mic"], a["highpass_hz"])
     speaker = Speaker(a["speaker"], a["echo_tail_ms"], volume)
     camera = make_camera(cfg)

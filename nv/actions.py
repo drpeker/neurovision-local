@@ -11,12 +11,21 @@ import re
 import time
 
 from . import web
+from .audio import set_mic_boost
 from .router import COLORS
 
 log = logging.getLogger(__name__)
 
 VOLUME_STEP = 15
+MIC_STEP_DB = 4
 DIRECTIONS = {"ileri": "Moving forward.", "geri": "Backing up.", "sol": "Turning left.", "sag": "Turning right."}
+
+
+def _decibels(db: int) -> str:
+    """Spoken by Piper: "plus 12 decibels" (it would read "+12 dB" letter by letter)."""
+    return f"{'minus' if db < 0 else 'plus'} {abs(db)} decibels" if db else "0 decibels"
+
+
 COLOR_WORDS = {v: k for k, v in COLORS.items() if k not in ("violet", "grey")}
 # Speaking about stored facts: they are written about "the user"
 YOU = ((r"\bthe user's\b", "your"), (r"\bthe user is\b", "you are"), (r"\bthe user has\b", "you have"),
@@ -72,6 +81,8 @@ class Actions:
         self.on_shutdown = None  # robot.py: on_shutdown("robot" | "sistem")
         self.wait_spoken = None  # brain: coroutine that returns when speech has finished
         self.last_seen: tuple[float, str] | None = None  # (time, description) for the LLM's notes
+        self.gate = None  # brain's SpeechGate: its noise floor follows a microphone gain change
+        self.mic_db = int(memory.get("mic_boost_db") or cfg["audio"]["mic_boost_db"])
 
     async def run(self, tool: str, args: dict) -> str | None:
         try:
@@ -185,6 +196,27 @@ class Actions:
         self._speaker.volume = max(10, v)  # fully silent, you could not hear the robot again
         self._memory.set("volume", str(self._speaker.volume))
         return f"Volume is now {self._speaker.volume} percent."
+
+    async def _mic(self, action: str, level: int | None = None) -> str:
+        """Microphone gain as a percent of the "Mic Boost" control (0 % = -10 dB, 100 % = +30 dB)."""
+        db = self.mic_db
+        if action == "sor":
+            return f"My microphone is at {(db + 10) * 100 // 40} percent, {_decibels(db)}."
+        if action == "ayarla" and level is not None:
+            new = round(level * 40 / 100) - 10
+        else:
+            new = db + (MIC_STEP_DB if action == "artır" else -MIC_STEP_DB)
+        # Below 0 dB speech hardly reaches the speech threshold; above +24 dB loud speech clips
+        new = max(0, min(24, new))
+        set_mic_boost(new, self._cfg["audio"]["card"])
+        if self.gate:
+            self.gate.floor_db += new - db  # room noise rises and falls with the gain
+        self.mic_db = new
+        self._memory.set("mic_boost_db", str(new))
+        return f"My microphone is now at {(new + 10) * 100 // 40} percent, {_decibels(new)}."
+
+    async def _levels(self) -> str:
+        return f"My speaker is at {self._speaker.volume} percent. {await self._mic('sor')}"
 
     async def _motor_speed(self, action: str, level: int | None = None) -> str:
         if not self.motors:
