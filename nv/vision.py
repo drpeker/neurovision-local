@@ -146,6 +146,28 @@ class Detector:
     async def shift(self, a: bytes, b: bytes, hfov: float) -> float:
         return await asyncio.get_running_loop().run_in_executor(self._pool, self._shift, a, b, hfov)
 
+    def _change(self, a: bytes, b: bytes, ignore: list) -> float | None:
+        """Iki kare ne kadar farkli: ortalama mutlak fark (0-255), 160x120 gri, parlaklik ortalamasi cikarilmis.
+
+        ignore: haric tutulan kutular (hareket eden kisi). Kareden pek bir sey kalmazsa None.
+        Pi kamerasinda yerinde duran robot 2-6, 1 derece donus ~19 verdi.
+        """
+        import numpy as np
+        from PIL import Image
+
+        def gray(jpeg):
+            g = np.asarray(Image.open(io.BytesIO(jpeg)).convert("L").resize((160, 120)), dtype=np.float32)
+            return g - g.mean()
+        keep = np.ones((120, 160), bool)
+        for x1, y1, x2, y2 in ignore:
+            keep[int(y1 * 120):int(np.ceil(y2 * 120)), int(x1 * 160):int(np.ceil(x2 * 160))] = False
+        if keep.mean() < 0.15:
+            return None
+        return float(np.abs(gray(a) - gray(b))[keep].mean())
+
+    async def change(self, a: bytes, b: bytes, ignore: list) -> float | None:
+        return await asyncio.get_running_loop().run_in_executor(self._pool, self._change, a, b, ignore)
+
     def _find_color(self, jpeg: bytes, color: str) -> list[Detection]:
         """Karedeki en buyuk tek renkli bolge (kirmizi kutu, turuncu top...); 80x60 izgarada."""
         import numpy as np

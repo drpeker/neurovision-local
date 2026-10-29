@@ -5,7 +5,8 @@ ortadan sapma kadar kisa donus darbesi. Hareket sirasindaki bulanik karelere bak
 Hedef kaybolursa son goruldugu yone dogru adim adim aranir. Gemini dongude degil;
 yalnizca "buldum" / "kaybettim" anlarinda kisa bir bildirim alir.
 Takilma: her darbeden sonra goruntu kaymasi olculur; art arda stall_pulses darbede robot
-beklenenin cok altinda donduyse (batarya bitti, koruma kesti, palet sikisti) takip durur.
+beklenenin cok altinda donduyse ve goruntu de degismediyse (batarya bitti, koruma kesti,
+palet sikisti) takip durur. Hedefin az kaymasi yetmez: kisi robotla birlikte yuruyebilir.
 """
 
 import asyncio
@@ -126,23 +127,33 @@ class Tracker:
         return duty, seconds, deg * seconds / 0.25
 
     async def _moved(self, before: bytes, after: bytes, expected: float,
-                     target_deg: float | None = None) -> bool:
+                     target_deg: float | None = None, ignore: tuple = ()) -> bool:
         """Darbe sonrasi donuldu mu? Art arda takilmada False (takip durmali).
 
         target_deg: hedefin kadrajdaki kaymasi (derece); yoksa goruntu kaymasi olculur.
+        Az kayma tek basina yetmez: kisi robotla ayni yone yururse de az kayar. Takildi
+        sayilmasi icin hedef disindaki goruntu (ignore kutulari haric) de degismemis olmali.
         """
+        c = self._cfg
         if target_deg is not None:
             deg = target_deg
-        elif expected > self._cfg["hfov_deg"] / 2:
-            return True  # iki kare ortusmez, goruntu kaymasi olculemez: karar verme
+        elif expected > c["hfov_deg"] / 2:
+            deg = 0.0  # iki kare ortusmez, kayma olculemez: karar goruntu farkiyla verilir
         else:
-            deg = await self._detector.shift(before, after, self._cfg["hfov_deg"])
-        if deg < self._cfg["stall_ratio"] * expected:
-            self._stalls += 1
-            log.info("takip: donus beklenenden az (%.1f / %.0f derece), %d. kez", deg, expected, self._stalls)
-        else:
+            deg = await self._detector.shift(before, after, c["hfov_deg"])
+        if deg >= c["stall_ratio"] * expected:
             self._stalls = 0
-        return self._stalls < self._cfg["stall_pulses"]
+            return True
+        diff = await self._detector.change(before, after, list(ignore))
+        if diff is None or diff >= c["still_diff"]:
+            log.info("takip: hedef az kaydi (%.1f / %.0f derece) ama goruntu degisti (fark %s): donuldu",
+                     deg, expected, "?" if diff is None else f"{diff:.1f}")
+            self._stalls = 0
+            return True
+        self._stalls += 1
+        log.info("takip: donus beklenenden az (%.1f / %.0f derece, goruntu farki %.1f), %d. kez",
+                 deg, expected, diff, self._stalls)
+        return self._stalls < c["stall_pulses"]
 
     async def turn_toward(self, e: float) -> float:
         """Sapma kadar don (yumusak rampasiz, kalibre guc); beklenen derece."""
@@ -202,9 +213,12 @@ class Tracker:
                 if pulse:
                     # Hedef donusten once ve sonra gorunduyse kadrajdaki kaymasi donusu gosterir;
                     # buyuk donuste iki kare ortusmez, goruntu kaymasi ~0 olcup "takildi" diyordu
+                    # Kadrajin kenarinda kesilen kutunun ortasi donusle birlikte kaymaz: olcu sayilmaz
+                    boxes = [b for b in (pulse[2], hit.box if hit else None) if b]
+                    edge = any(b[0] < 0.02 or b[2] > 0.98 for b in boxes)
                     target_deg = (abs(turned[0] - (hit.cx - 0.5)) * c["hfov_deg"]
-                                  if hit and turned else None)
-                    moved = await self._moved(pulse[0], jpeg, pulse[1], target_deg)
+                                  if hit and turned and not edge else None)
+                    moved = await self._moved(pulse[0], jpeg, pulse[1], target_deg, boxes)
                     pulse = None
                     if not moved:
                         log.warning("takip durdu: motorlar donmuyor (batarya/koruma/sikisma?)")
@@ -235,7 +249,7 @@ class Tracker:
                     lost = False
                     if abs(e) > c["center_tolerance"]:
                         turned = (e, await self.turn_toward(e))
-                        pulse = (jpeg, turned[1])
+                        pulse = (jpeg, turned[1], hit.box)
                         settled = await self._settle()
                         # Dinleme araligi: mikrofon acik kalsin, "dur" duyulsun
                         await asyncio.sleep(c["listen_s"])

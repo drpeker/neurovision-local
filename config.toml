@@ -189,6 +189,8 @@ search_duty = 36
 # Takilma: art arda bu kadar darbede donus beklenenin bu oranindan azsa takip durur
 stall_pulses = 3
 stall_ratio = 0.25
+# ...ve hedef disindaki goruntu farki (0-255) bunun altindaysa; yerinde 2-6, 1 derece donus ~19 olculdu
+still_diff = 8
 timeout_s = 60
 max_timeout_s = 300
 
