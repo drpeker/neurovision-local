@@ -166,6 +166,11 @@ class LanguageModel:
         self._last: tuple[str, str, float] | None = None
         self.timings: dict = {}
 
+    def remember(self, text: str, answer: str) -> None:
+        """A command answered without the model ("my processor is at 56 degrees") becomes the last
+        exchange, so a follow-up ("is it good?") is read against it."""
+        self._last = (text, SENTENCE_END.split(answer)[0].strip(), time.monotonic())
+
     def _post(self, messages: list[dict], max_tokens: int, stream: bool):
         data = {"messages": messages, "max_tokens": max_tokens, "stream": stream, "cache_prompt": True}
         req = urllib.request.Request(self._url, data=json.dumps(data).encode(),

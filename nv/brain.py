@@ -272,6 +272,8 @@ class LocalBrain:
             answer = "Sorry, I didn't catch that. Could you say it again?"
         else:
             answer = await self.actions.run(tool, args)
+            if answer is not None:
+                self._llm.remember(text, answer)
         if answer is not None:
             self.say(answer)
         else:
