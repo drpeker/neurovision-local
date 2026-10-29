@@ -169,7 +169,10 @@ class Detector:
         return await asyncio.get_running_loop().run_in_executor(self._pool, self._change, a, b, ignore)
 
     def _find_color(self, jpeg: bytes, color: str) -> list[Detection]:
-        """Karedeki en buyuk tek renkli bolge (kirmizi kutu, turuncu top...); 80x60 izgarada."""
+        """Karedeki tek renkli bolgeler (kirmizi kutu, turuncu top...), buyukten kucuge en fazla 4; 80x60 izgarada.
+
+        Hepsi doner: kadrajda iki kirmizi sey varsa takip onceki konuma yakin olanda kalir (yalniz en
+        buyugu donunce kareden kareye ikisi arasinda gidip geliyordu)."""
         import numpy as np
         from PIL import Image
         img = Image.open(io.BytesIO(jpeg)).convert("RGB").resize((80, 60))
@@ -180,7 +183,7 @@ class Detector:
             return []
         # En buyuk bagli bolge (4-komsu, basit tasma doldurma)
         seen = np.zeros_like(mask)
-        best: list[tuple[int, int]] = []
+        regions: list[list[tuple[int, int]]] = []
         for y, x in zip(*np.nonzero(mask)):
             if seen[y, x]:
                 continue
@@ -193,13 +196,14 @@ class Detector:
                     if 0 <= ny < 60 and 0 <= nx < 80 and mask[ny, nx] and not seen[ny, nx]:
                         seen[ny, nx] = True
                         stack.append((ny, nx))
-            if len(region) > len(best):
-                best = region
-        if len(best) < 0.004 * 4800:
-            return []
-        ys, xs = zip(*best)
-        box = (float(min(xs)) / 80, float(min(ys)) / 60, float(max(xs) + 1) / 80, float(max(ys) + 1) / 60)
-        return [Detection(COLORED, min(1.0, len(best) / 4800 * 20), box, (color,))]
+            if len(region) >= 0.004 * 4800:
+                regions.append(region)
+        found = []
+        for region in sorted(regions, key=len, reverse=True)[:4]:
+            ys, xs = zip(*region)
+            box = (float(min(xs)) / 80, float(min(ys)) / 60, float(max(xs) + 1) / 80, float(max(ys) + 1) / 60)
+            found.append(Detection(COLORED, min(1.0, len(region) / 4800 * 20), box, (color,)))
+        return found
 
     async def find_color(self, jpeg: bytes, color: str) -> list[Detection]:
         self.last = await asyncio.get_running_loop().run_in_executor(self._pool, self._find_color, jpeg, color)

@@ -85,7 +85,7 @@ def _degrees(t: str) -> float:
         return float(DEGREE_WORDS[m.group(1)])
     if re.search(r"\b(full circle|full turn|all the way around|360)\b", t):
         return 360.0
-    if re.search(r"\b(around|half (a )?turn|half circle|other way|u turn)\b", t):
+    if re.search(r"\b(around|back|half (a )?turn|half circle|other way|u turn)\b", t):
         return 180.0
     if re.search(r"\bquarter( turn)?\b", t):
         return 90.0
@@ -252,7 +252,7 @@ def route(text: str) -> tuple[str, dict]:
         if not direction and _order(t, r"back up|back off|reverse|go back|move back|backward|backwards"):
             direction = "geri"
         # "Turn around" has no side: a half turn to the left
-        if not direction and _order(t, r"turn|spin|rotate") and re.search(r"\b(around|other way|u turn|full circle)\b", t):
+        if not direction and _order(t, r"turn|spin|rotate") and re.search(r"\b(around|back|other way|u turn|full circle)\b", t):
             direction = "sol"
         if direction in ("sol", "sag"):
             return "move", {"direction": direction, "seconds": _seconds(t), "speed": _speed(t),

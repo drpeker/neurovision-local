@@ -276,6 +276,15 @@ class Tracker:
             await self._say("I stopped following: no signal reaches my motor pins. "
                             "I may need a restart.")
 
+    async def _listen_gap(self, seconds: float) -> None:
+        """Hareketten sonra mikrofon motor susma payindan sonra acilir: o acildiktan sonra seconds dinle.
+
+        Yoksa ardi ardina donuslerde mikrofon hic acilmiyor, "stop" duyulmuyordu. Konusma baslarsa
+        _held sonraki donusu cumle anlasilana kadar bekletir."""
+        while self._motors.busy:
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(seconds)
+
     async def _held(self) -> bool:
         """Kullanici konusurken donme: donus mikrofonu kapatir ve yarim cumle atilir ("stop" duyulmaz).
 
@@ -366,8 +375,8 @@ class Tracker:
                                 await self._report_stall()
                                 return
                             prev_cx = seen.cx if seen else prev_cx
+                            await self._listen_gap(c["listen_s"])
                             settled = time.monotonic()
-                            await asyncio.sleep(c["listen_s"])
                             continue
                         t0 = time.monotonic()
                         turned = (e, await self.turn_toward(e))
@@ -428,8 +437,8 @@ class Tracker:
                     if stalled:
                         await self._report_stall()
                         return
+                    await self._listen_gap(c["look_s"])
                     settled = time.monotonic()
-                    await asyncio.sleep(c["look_s"])
                     continue
                 duty = c["search_duty"]
                 # Aramada takilma kontrolu yok: hedef cikinca kamera cogu zaman duz duvara bakar,

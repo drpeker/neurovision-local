@@ -104,16 +104,19 @@ class AngleTurner:
         self.stalled = False  # son donuste motora guc gitti ama robot donmedi
 
     async def turn(self, degrees: float, settle: bool = True) -> float:
-        """degrees: sola pozitif. Hedefe kalan hatayi (derece) dondurur."""
-        return await self.turn_to(self.imu.heading + degrees, settle)
+        """degrees: sola pozitif, oldugu gibi ("sola 180" sola, 360 tam tur). Kalan hatayi dondurur."""
+        return await self.turn_to(self.imu.heading + degrees, settle, shortest=False)
 
-    async def turn_to(self, heading: float, settle: bool = True) -> float:
+    async def turn_to(self, heading: float, settle: bool = True, shortest: bool = True) -> float:
         """Mutlak yone don (self.target donerken guncellenebilir). Iptal edilirse motor durur.
 
         settle=False: son donusten sonra kaymanin bitmesi beklenmez (takip hemen bakar).
+        shortest: hedefe en kisa yoldan (takip); False ise istenen aci kadar.
         """
         c = self._cfg
-        self.target, self.stalled = self.imu.heading + wrap(heading - self.imu.heading), False
+        if shortest:
+            heading = self.imu.heading + wrap(heading - self.imu.heading)
+        self.target, self.stalled = heading, False
         try:
             for attempt in range(c["max_corrections"] + 1):
                 err = self.target - self.imu.heading

@@ -200,7 +200,7 @@ frame_lag_s = 0.05
 # Buyuk sapmada %40 ile darbe uzar, en fazla bu kadar
 pulse_max = 0.6
 # Her donusten sonra kisa bakis payi; konusma kesilmez (kullanici konusurken takip donmez, hold_max_s)
-listen_s = 0.15
+listen_s = 0.4
 # Hedef bu kadar gorunmezse aranir: son goruldugu yone search_steps kez donulur
 lost_s = 1.0
 search_steps = 12
@@ -211,7 +211,7 @@ search_duty = 45
 sweep_step_deg = 35
 # Hedef bundan hizli yana gidiyorduysa (derece/sn) kaybolunca gittigi tarafa aranir
 moving_dps = 8
-look_s = 0.3
+look_s = 0.4
 # Takilma: art arda bu kadar darbede donus beklenenin bu oranindan azsa takip durur
 stall_pulses = 3
 stall_ratio = 0.25
