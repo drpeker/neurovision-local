@@ -72,6 +72,8 @@ min_speech_ms = 200
 # -26, en yuksek -18) bu kadar yuksek olmali
 motor_noise_db = -26
 motor_margin_db = 8
+# Takip surerken konusma en fazla bu kadar (sn) dinlenip islenir: komut kisadir
+max_command_s = 4
 # webrtcvad hassasiyeti 0-3; 3 boguk INMP441'de konusmanin ortasini da kesiyor
 aggressiveness = 2
 preroll_ms = 300

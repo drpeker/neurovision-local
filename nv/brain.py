@@ -19,7 +19,7 @@ from .audio import FRAME_MS, Mic, Speaker
 from .body import Body
 from .camera import Camera
 from .debug import DebugRecorder
-from .local_ai import LanguageModel, SpeechToText, TextToSpeech
+from .local_ai import LanguageModel, SpeechToText, TextToSpeech, latin
 from .memory import Memory
 from .router import route
 from .vad import SpeechGate, frame_db
@@ -134,6 +134,10 @@ class LocalBrain:
         """The user is speaking, or what they said is not understood yet: following waits with turns."""
         return self.gate.active or self._routing
 
+    def _following(self) -> bool:
+        tracker = self.actions.tracker
+        return bool(tracker and tracker.active)
+
     def _busy(self) -> bool:
         """Half duplex for the robot's own voice only. The mic stays open while the motors run
         (muting it then made "stop" go unheard during following); motor noise is handled by
@@ -203,6 +207,11 @@ class LocalBrain:
                 if self.face:
                     self.face.poke()
             utterance.extend(frames)
+            if self.gate.active and self._following() and len(utterance) * FRAME_MS / 1000 > self._cfg["vad"]["max_command_s"]:
+                # While following, "stop stop stop..." with no pause kept the sentence open for 12 s:
+                # cut it, a command is short
+                self.gate.reset()
+                event = "end"
             if event == "end":
                 if self._rec:
                     self._rec.start(utterance)
@@ -232,17 +241,29 @@ class LocalBrain:
             log.info("nothing recognised (%.2f s)", heard_s)
             if self.face:
                 self.face.thinking = False
+            if self._following():
+                # Said while following and not understood: on the robot this was nearly always a
+                # "stop" (Parakeet often returns nothing for a short "Stop."). Stopping is safe.
+                await self._stop_following(time.monotonic() - t0)
             return
         if self.face:
             self.face.caption(text, "user")
         self._memory.add_turn("user", text)
 
         tool, args = route(text)
+        if confidence <= -9.0 and route(latin(text))[0] == "stop":
+            tool, args = "stop", {}  # "Стоп, стоп": a "stop" written in another script
         self._routing = False  # understood: following may turn again (a "stop" has already been routed)
         log.info("heard %r (%.1f s audio, %.2f s, confidence %.2f) -> %s %s",
                  text, len(pcm) / 32000, heard_s, confidence, tool, args or "")
 
-        if tool in RISKY and confidence < self._min_risky or tool in GUARDED and confidence < self._min_command:
+        if tool == "stop":
+            answer = await self.actions.run(tool, args)  # never doubted: stopping is always safe
+        elif self._following() and (tool in GUARDED and confidence < self._min_command
+                                    or tool == "chat" and confidence < self._min_chat):
+            await self._stop_following(time.monotonic() - t0)
+            return
+        elif tool in RISKY and confidence < self._min_risky or tool in GUARDED and confidence < self._min_command:
             answer = "Sorry, I'm not sure I heard that right. Please say it again."
         elif tool == "chat" and confidence < self._min_chat:
             answer = "Sorry, I didn't catch that. Could you say it again?"
@@ -258,6 +279,13 @@ class LocalBrain:
         self._memory.add_turn("robot", answer)
         await self._wait_spoken()
         log.info("turn done in %.1f s, listening", time.monotonic() - t0)
+
+    async def _stop_following(self, after_s: float) -> None:
+        await self.actions.run("stop", {})
+        answer = "I stopped. Say follow again to go on."
+        self.say(answer)
+        log.info("answer (%.1f s after speech): %s", after_s, answer)
+        await self._wait_spoken()
 
     async def _chat(self, text: str) -> str:
         """Qwen answers; a few notes (matching memories, what it just saw) go with the question."""

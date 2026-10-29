@@ -135,6 +135,16 @@ class SpeechToText:
         return text, min(scores, default=0.0)
 
 
+CYRILLIC = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+                    ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "i", "k", "l", "m", "n", "o", "p", "r",
+                     "s", "t", "u", "f", "h", "ts", "ch", "sh", "sh", "", "y", "", "e", "yu", "ya"]))
+
+
+def latin(text: str) -> str:
+    """Parakeet sometimes writes English in Cyrillic ("Стоп" for "Stop"): spell it in Latin letters."""
+    return "".join(CYRILLIC.get(ch.lower(), ch) for ch in text)
+
+
 def dedupe(text: str) -> str:
     """A recogniser sometimes repeats a sentence ("Is it on? Is it on? Is it on?"): keep one."""
     out: list[str] = []

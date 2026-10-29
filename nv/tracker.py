@@ -326,6 +326,12 @@ class Tracker:
             # Sure hedefin son goruldugu andan sayilir: gordukce takip surer (en fazla max_timeout_s)
             while (time.monotonic() - max(start, self.last_seen) < seconds
                    and time.monotonic() - start < c["max_timeout_s"]):
+                if self.hold and self.hold():
+                    # Kullanici konusuyor: bakmayi da durdur, isleyici konusma tanimaya kalsin
+                    # (YOLO ile ayni anda 11 sn'lik konusmanin tanimasi 10 sn surdu)
+                    await asyncio.sleep(0.05)
+                    settled = time.monotonic()
+                    continue
                 jpeg = await self._frame_after(settled)
                 frame_at = self._camera.latest_at
                 if not jpeg:
