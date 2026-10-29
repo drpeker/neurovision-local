@@ -229,10 +229,12 @@ class Motors:
         log.warning("motor sinyal kontrolu: PWM %s (40 olcumde %d yuksek)", "VAR" if ok else "YOK", highs)
         return {"pwm_sinyali": "var" if ok else "yok"}
 
-    async def stop(self) -> dict:
+    async def stop(self, quiet: bool = False) -> dict:
+        """quiet: takibin erken durdurmasi (hedef ortaya geldi), her seferinde loglanmaz."""
         await self._cancel()
         self.halt()
-        log.info("motorlar durduruldu")
+        if not quiet:
+            log.info("motorlar durduruldu")
         return {"result": "Durdum."}
 
     def close(self) -> None:

@@ -184,6 +184,10 @@ turn_table = [[40, 14]]
 pulse_min = 0.15
 # Robot durduktan bu kadar sonraki kareye bakilir (titreme/bulanma gecsin)
 settle_s = 0.1
+# %40'ta donus hizi (derece/sn, turn_table'dan: 14 derece / 0.25 sn): donerken goruldugunde hedefin
+# su anki yeri bununla tahmin edilir. Kare ile tanima arasi ~0.25 sn; kamera karesi ~frame_lag_s eski
+track_rate_dps = 56
+frame_lag_s = 0.05
 # Buyuk sapmada %40 ile darbe uzar, en fazla bu kadar
 pulse_max = 0.6
 # Her donusten sonra kisa bakis payi; konusma kesilmez (kullanici konusurken takip donmez, hold_max_s)

@@ -1,7 +1,8 @@
 """Nesne takibi: robot yalnizca yerinde donerek hedefi kadrajin ortasinda tutar.
 
-Dongu: hareket bittikten sonra cekilen yeni kare -> YOLO -> hedefin yatay konumu ->
-ortadan sapma kadar kisa donus darbesi. Hareket sirasindaki bulanik karelere bakilmaz.
+Dongu: robot durunca cekilen kare -> YOLO -> hedefin yatay konumu -> ortadan sapma kadar donus
+darbesi. Donerken de her yeni kareye bakilir: hedef ortaya gelince (ya da aramada gorununce)
+motor erken durdurulur; boylece hedef gecilmez ve kaybolunca yeri tahmin edilir.
 Hedef kaybolursa son goruldugu yone dogru adim adim aranir. Gemini dongude degil;
 yalnizca "buldum" / "kaybettim" anlarinda kisa bir bildirim alir.
 Takilma: her darbeden sonra goruntu kaymasi olculur; art arda stall_pulses darbede robot
@@ -30,7 +31,7 @@ class Tracker:
         self.target: str | None = None
         self.color: str | None = None  # istege bagli: "turuncu" kase, "siyah" fare
         self.last_seen = 0.0
-        self._boost = 1.0  # zemine gore guc carpani (takip boyunca ogrenilir)
+        self._boost = 1.0  # guc carpani; sabit (titrek tanimayla ogrenince buyuyup hedefi gecirtiyordu)
         self._stalls = 0  # art arda donmeyen darbe sayisi
         self.face = None  # gozler hedefe baksin
         self.notify = None  # LiveBrain: kisa olay bildirimi (metin)
@@ -167,13 +168,34 @@ class Tracker:
         log.debug("takip: e=%+.2f -> %%%d %.2f sn (~%.0f derece, carpan %.2f)", e, duty, seconds, deg, self._boost)
         return deg
 
-    def _adapt(self, prev_e: float, e: float, expected_deg: float) -> None:
-        """Zemin farki: beklenenden az donduyse gucu artir, cok donduyse azalt."""
-        moved = abs(prev_e - e) * self._cfg["hfov_deg"]
-        if moved < 0.4 * expected_deg:
-            self._boost = min(2.0, self._boost * 1.3)
-        elif moved > 1.6 * expected_deg:
-            self._boost = max(0.6, self._boost * 0.8)
+    async def _watch(self, sign: int, since: float, prev_cx: float | None, search: bool) -> Detection | None:
+        """Donerken de bak: her yeni karede tanima; hedef ortaya gelince motoru hemen durdur.
+
+        Kare ve tanima ~0.25 sn gecikmeli: o surede robot donmeye devam etti, hedefin su anki yeri
+        track_rate_dps ile tahmin edilir. Aramada hedef gorunur gorunmez durulur. Son goruleni dondurur;
+        self._est_e (hedefin tahmini sapmasi) her gorulmede guncellenir.
+        """
+        c = self._cfg
+        seen, last_t = None, since
+        while self._motors.moving:
+            if self._camera.latest_at <= last_t:
+                await asyncio.sleep(0.01)
+                continue
+            last_t = self._camera.latest_at
+            jpeg = self._camera.frame()
+            found = (await self._detector.find_color(jpeg, self.color) if self.target == COLORED
+                     else await self._detector.detect(jpeg))
+            hit = self._pick(found, prev_cx)
+            if not hit:
+                continue
+            seen, prev_cx = hit, hit.cx
+            lag = time.monotonic() - (last_t - c["frame_lag_s"])
+            self._est_e = (hit.cx - 0.5) - sign * c["track_rate_dps"] * lag / c["hfov_deg"]
+            if search or sign * self._est_e <= c["center_tolerance"]:
+                await self._motors.stop(quiet=True)
+                log.debug("takip: donerken goruldu (sapma %+.2f), durduruldu", self._est_e)
+                break
+        return seen
 
     def _pick(self, found: list[Detection], prev_cx: float | None, locked: bool = False) -> Detection | None:
         """locked: hedef ortadayken onceki konumunun yakininda model esigindeki zayif tanima da sayilir
@@ -224,6 +246,8 @@ class Tracker:
         turned = None  # (donusten onceki sapma, beklenen derece)
         pulse = None  # (donusten onceki kare, beklenen derece): takilma kontrolu
         self._boost, self._stalls = 1.0, 0
+        # Hedefin tahmini sapmasi: gorulunce olculur, donuldukce kaydirilir; kaybolunca arama yonu bu
+        self._est_e = -0.3 if side == "sol" else 0.3
         self.last_seen = 0.0
         announced = lost = False  # lost: "kayboldu" denildi, bulununca "tekrar bulundu" denir
         try:
@@ -261,18 +285,9 @@ class Tracker:
                         return
                 now = time.monotonic()
                 if hit:
-                    if searched:
-                        # Aramadan sonra ilk donus: titrek tanimayla buyumus guc carpani hedefi gecirtiyordu
-                        self._boost, turned = 1.0, None
                     self.last_seen, searched = now, 0
                     e = hit.cx - 0.5  # <0: hedef goruntunun solunda
-                    prev_cx = hit.cx
-                    if turned:
-                        self._adapt(turned[0], e, turned[1])
-                        turned = None
-                    if abs(e) > c["center_tolerance"]:
-                        # Ortadayken kaybolursa (tanima kacirdi) yon belirsiz: son belirgin yon kalir
-                        last_dir = -1 if e < 0 else 1
+                    prev_cx, self._est_e, turned = hit.cx, e, None
                     if self.face:
                         self.face.gaze(e)
                     if not announced:
@@ -292,9 +307,16 @@ class Tracker:
                         if await self._held():
                             settled = time.monotonic()  # beklerken hedef kaymis olabilir: yeni kare
                             continue
+                        t0 = time.monotonic()
                         turned = (e, await self.turn_toward(e))
                         pulse = (jpeg, turned[1], hit.box)
+                        sign = -1 if e < 0 else 1
+                        if not await self._watch(sign, t0 + 0.05, prev_cx, search=False):
+                            # Donerken hic gorulmedi: donulen kadar kaydi (asiri donuste ters taraftan cikar)
+                            self._est_e -= sign * c["track_rate_dps"] * (time.monotonic() - t0) / c["hfov_deg"]
                         settled = await self._settle()
+                        # Erken durduysa takilma kontrolu donulen sure kadarini beklesin
+                        pulse = (jpeg, min(turned[1], c["track_rate_dps"] * (settled - t0)), hit.box)
                         # Dinleme araligi: mikrofon acik kalsin, "dur" duyulsun
                         await asyncio.sleep(c["listen_s"])
                     else:
@@ -313,8 +335,8 @@ class Tracker:
                 if locked:
                     log.info("takip: %s %.0f sn gorunmedi, kilit acildi", target, now - self.last_seen)
                     locked = False
-                if searched == 0 and prev_cx is not None and abs(prev_cx - 0.5) > 0.02:
-                    last_dir = -1 if prev_cx < 0.5 else 1  # en son goruldugu tarafa ara
+                if searched == 0 and abs(self._est_e) > 0.02:
+                    last_dir = -1 if self._est_e < 0 else 1  # hedefin tahmini yerine dogru ara
                 if await self._held():
                     settled = time.monotonic()
                     continue
@@ -330,8 +352,10 @@ class Tracker:
                 # Aramada takilma kontrolu yok: hedef cikinca kamera cogu zaman duz duvara bakar,
                 # goruntu kaymasi olculemez (~0 derece) ve donen robot "takildi" sayiliyordu
                 pulse = None
+                t0 = time.monotonic()
                 await self._motors.move("sol" if last_dir < 0 else "sag", c["search_pulse"],
                                         duty=duty, soft=False)
+                await self._watch(last_dir, t0 + 0.05, None, search=True)
                 settled = await self._settle()
                 await asyncio.sleep(c["listen_s"])
             log.info("takip suresi doldu: %s", target)
