@@ -40,7 +40,9 @@ class Tracker:
     def active(self) -> bool:
         return bool(self._task and not self._task.done())
 
-    async def start(self, target: str, seconds: float | None = None, color: str | None = None) -> dict:
+    async def start(self, target: str, seconds: float | None = None, color: str | None = None,
+                    side: str | None = None) -> dict:
+        """side: "sol" / "sag" - hedef bastan gorunmuyorsa aramaya o yone baslanir (yoksa saga)."""
         if target not in COCO80 and target != COLORED:
             return {"error": f"'{target}' tanınan nesneler arasında yok; renkliyse colored object kullan."}
         if color and color not in COLORS:
@@ -52,7 +54,7 @@ class Tracker:
         c = self._cfg
         seconds = max(5.0, min(float(seconds or c["timeout_s"]), c["max_timeout_s"]))
         self.target = target
-        self._task = asyncio.create_task(self._run(target, seconds), name="tracker")
+        self._task = asyncio.create_task(self._run(target, seconds, side), name="tracker")
         log.info("takip basladi: %s%s (%.0f sn)", target, f" ({color})" if color else "", seconds)
         return {"result": f"{self._label()} takibi başladı ({seconds:.0f} sn). Bulunca ya da "
                           "kaybedince sana kısa bir bildirim gelecek; o zamana kadar konuşma."}
@@ -201,11 +203,11 @@ class Tracker:
         if self.notify:
             await self.notify(text)
 
-    async def _run(self, target: str, seconds: float) -> None:
+    async def _run(self, target: str, seconds: float, side: str | None = None) -> None:
         c = self._cfg
         name = self._spoken()
         start = time.monotonic()
-        prev_cx, last_dir, searched = None, 1, 0
+        prev_cx, last_dir, searched = None, -1 if side == "sol" else 1, 0
         turned = None  # (donusten onceki sapma, beklenen derece)
         pulse = None  # (donusten onceki kare, beklenen derece): takilma kontrolu
         self._boost, self._stalls = 1.0, 0
@@ -252,7 +254,9 @@ class Tracker:
                     if turned:
                         self._adapt(turned[0], e, turned[1])
                         turned = None
-                    last_dir = -1 if e < 0 else 1
+                    if abs(e) > c["center_tolerance"]:
+                        # Ortadayken kaybolursa (tanima kacirdi) yon belirsiz: son belirgin yon kalir
+                        last_dir = -1 if e < 0 else 1
                     if self.face:
                         self.face.gaze(e)
                     if not announced:

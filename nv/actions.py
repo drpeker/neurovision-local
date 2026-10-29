@@ -108,17 +108,19 @@ class Actions:
         result = await self.motors.move(direction, max(0.25, min(3.0, seconds)), speed)
         return DIRECTIONS[direction] if "error" not in result else "I can't move that way."
 
-    async def _track(self, target: str | None, color: str | None = None) -> str:
+    async def _track(self, target: str | None, color: str | None = None, side: str | None = None) -> str:
         if not self.tracker:
             return "I can't follow things right now; my camera or motors are not ready."
         if not target:
             return "I can only follow things I recognise, like a person, a cup or a bottle."
-        result = await self.tracker.start(target, color=color)
+        result = await self.tracker.start(target, color=color, side=side)
         if "error" in result:
             return "I can't follow that."
         if target == "person":
             return "Okay, I'm following you."
         label = f"{COLOR_WORDS.get(color, '')} {'object' if target == 'colored object' else target}".strip()
+        if side:
+            return f"Okay, I'll look to my {'left' if side == 'sol' else 'right'} for the {label}."
         return f"Okay, I'm following the {label}."
 
     async def _turn_to(self, target: str | None, color: str | None = None) -> str:

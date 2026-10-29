@@ -146,12 +146,22 @@ def route(text: str) -> tuple[str, dict]:
 
     # --- following and turning to things ---
     # "Find and follow the TV", "Look for the ball and track it": the thing is before or after the verb
-    m = _order(t, r"(?:(?:go )?(?:find|look for|search for) ((?:\w+ ){0,3}?)and )?(?:follow|track|watch|keep an eye on|keep looking at)")
+    # "on the left", "to your right", "left side": the robot's own side; the search starts there
+    s = re.search(r"\b(?:on|to|at) (?:the |your |my )?(left|right)\b|\b(left|right) side\b", t)
+    side = {"left": "sol", "right": "sag"}[s.group(1) or s.group(2)] if s else None
+    m = _order(t, r"(?:(?:go )?(?:find|look for|search for) ((?:\w+ ){0,6}?)and )?(?:follow|track|watch|keep an eye on|keep looking at)")
     if m:
         obj, color = _target(t[m.end():])
         if obj is None and m.group(1):
             obj, color = _target(m.group(1))
-        return "track", {"target": obj, "color": color}
+        return "track", {"target": obj, "color": color, "side": side}
+    # "Find the TV on the left": look for it and keep it in view (a thing it can recognise only;
+    # "find my keys" is a question for memory)
+    m = _order(t, r"(?:go )?(?:find|look for|search for)")
+    if m:
+        obj, color = _target(t[m.end():])
+        if obj and obj != "person":
+            return "track", {"target": obj, "color": color, "side": side}
     m = _order(t, r"look at|turn to|turn towards|turn toward|face")
     if m:
         rest = t[m.end():]
