@@ -133,7 +133,8 @@ async def run(cfg: dict) -> None:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, task.cancel)
-        log.info("NeuroVision local ready (%.1f s). Ctrl+C to stop.", time.monotonic() - started)
+        log.info("NeuroVision local started (%.1f s), waiting for the language model. Ctrl+C to stop.",
+                 time.monotonic() - started)
         try:
             await task
         except asyncio.CancelledError:
@@ -228,7 +229,7 @@ async def make_face(cfg: dict, speaker: Speaker, brain):
     except Exception as e:
         log.warning("screen did not open, continuing without it: %s", e)
         return None
-    face = Face(cfg["display"], panel, speaker, brain.gate, brain.body)
+    face = Face(cfg["display"], panel, speaker, brain.gate, brain.body, wait_ready=True)
     await face.start()
     brain.attach_face(face)
     asyncio.create_task(show_wifi_setup(face), name="wifi-status")

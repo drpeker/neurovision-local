@@ -209,9 +209,12 @@ class Captions:
 class Face:
     """Durumu robotun parcalarindan okur, yuzu cizer. LiveBrain yalnizca thinking/flash/emotion verir."""
 
-    def __init__(self, cfg: dict, panel: Panel, speaker, gate, body):
+    def __init__(self, cfg: dict, panel: Panel, speaker, gate, body, wait_ready: bool = False):
+        """wait_ready: acilis logosu ready() cagrilana kadar kalir (yerel beyin: modeller yuklenene kadar)."""
         self._cfg = cfg
         self._panel = panel
+        self._wait_ready = wait_ready
+        self._ready = asyncio.Event()
         self._speaker, self._gate, self._body = speaker, gate, body
         self._canvas = Canvas(panel.w, panel.h)
         self._pool = ThreadPoolExecutor(1, thread_name_prefix="display")
@@ -284,6 +287,10 @@ class Face:
         self._preview = jpeg
         self.poke()
 
+    def ready(self) -> None:
+        """Robot tamamen hazir: logo yerini yuze birakir."""
+        self._ready.set()
+
     def caption(self, text: str, who: str) -> None:
         """who: "user" ya da "robot". Metin akarken her parcada tamami verilir."""
         self._caption = (text.strip(), who)
@@ -317,6 +324,8 @@ class Face:
     async def _loop(self) -> None:
         # Acilis ekrani kalsin (robot bu arada ortami dinleyip baglaniyor), sonra yuz
         await asyncio.sleep(self._cfg["splash_s"])
+        if self._wait_ready:
+            await self._ready.wait()
         await self._run_panel(self._panel.blit, self._canvas.buf, 0, self._panel.h - 1)
         self._status_key = None
         while True:

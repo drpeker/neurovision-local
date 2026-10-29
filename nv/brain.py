@@ -161,14 +161,25 @@ class LocalBrain:
         speaker_task = asyncio.create_task(self._speak_worker(), name="speech")
         llm_task = asyncio.create_task(self._start_llm(llm_loading), name="llm")
         try:
-            await self._calibrate()
+            # Not listening and the logo on the screen until everything is loaded: "I'm ready" came
+            # ~30 s before chat worked
+            try:
+                await llm_task
+            except Exception as e:
+                log.warning("language model did not start, commands only: %s", e)
+            await self._calibrate()  # room noise, now that loading is over
             if self._rec:
                 self._rec.session(Path(self._cfg["local"]["llm_model"]).name, self._cfg["local"]["system_prompt"])
-            log.info("listening (commands now, chat when the language model is loaded)")
             # The face shows "offline" (flat gray eyes) until this is set; Gemini Live set it on
-            # connect, here it means speech recognition is loaded and the robot is listening
+            # connect, here it means everything is loaded and the robot is listening
             self.body.connected_since = time.monotonic()
-            self.say("I'm ready.")
+            if self.face:
+                self.face.ready()
+            self.say("I'm ready.")  # the mic is off while the robot speaks
+            await self._wait_spoken()
+            while not self._mic.frames.empty():
+                self._mic.frames.get_nowait()  # nothing heard during loading counts
+            log.info("fully ready, listening")
             await self._listen()
         finally:
             self.body.connected_since = None
@@ -180,7 +191,7 @@ class LocalBrain:
         await loading
         t = await self._llm.warm_up()
         self._llm_ready = True
-        log.info("language model ready %.1f s after listening started (system prompt cached in %.1f s)",
+        log.info("language model ready %.1f s after speech recognition (system prompt cached in %.1f s)",
                  time.monotonic() - t0, t)
 
     async def _calibrate(self) -> None:
