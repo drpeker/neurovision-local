@@ -68,6 +68,11 @@ class Motors:
                 "not": "Hız düzeyi tüm hareketleri çarpar; yavaş/hızlı seçenekleri bunun üstüne uygulanır."}
 
     @property
+    def moving(self) -> bool:
+        """Motorlara guc gidiyor (busy'den farkli olarak susma payi yok): takip durunca hemen bakar."""
+        return time.monotonic() < self._moving_until
+
+    @property
     def busy(self) -> bool:
         """Motor calisiyor ya da yeni durdu: mikrofon bu surede susar."""
         return time.monotonic() < max(self._moving_until, self._quiet_until)

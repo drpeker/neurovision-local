@@ -95,16 +95,16 @@ class Tracker:
 
     # --- dongu ---
     async def _settle(self) -> float:
-        """Motor dursun (mikrofon sessiz suresi dahil); durdugu ani dondur."""
-        while self._motors.busy:
+        """Motor dursun (mikrofonun susma payi beklenmez: goruntu hemen tazelenir); durdugu ani dondur."""
+        while self._motors.moving:
             await asyncio.sleep(0.05)
         return time.monotonic()
 
     async def _frame_after(self, t: float) -> bytes | None:
-        """t'den sonra cekilmis kare (hareket bulaniksiz)."""
+        """t'den sonra cekilmis kare (hareket bulaniksiz: robot durduktan settle_s sonra)."""
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            if self._camera.latest_at > t + 0.05:
+            if self._camera.latest_at > t + self._cfg["settle_s"]:
                 return self._camera.frame()
             await asyncio.sleep(0.05)
         return None
@@ -119,7 +119,9 @@ class Tracker:
         angle = abs(e) * c["hfov_deg"] * self._boost
         for duty, deg in c["turn_table"]:
             if deg >= angle:
-                return duty, 0.25, deg
+                # Kucuk aci kisa darbeyle: dusuk PWM'de disli motorlar esit donmuyor, neredeyse duruyor
+                seconds = max(c["pulse_min"], 0.25 * angle / deg)
+                return duty, seconds, deg * seconds / 0.25
         duty, deg = c["turn_table"][-1]
         rate = c.get("turn_rate_dps")
         if rate:
@@ -311,6 +313,8 @@ class Tracker:
                 if locked:
                     log.info("takip: %s %.0f sn gorunmedi, kilit acildi", target, now - self.last_seen)
                     locked = False
+                if searched == 0 and prev_cx is not None and abs(prev_cx - 0.5) > 0.02:
+                    last_dir = -1 if prev_cx < 0.5 else 1  # en son goruldugu tarafa ara
                 if await self._held():
                     settled = time.monotonic()
                     continue

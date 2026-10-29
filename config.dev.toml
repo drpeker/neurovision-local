@@ -82,7 +82,7 @@ device = "/dev/video0"
 width = 640
 height = 480
 # OV5647 1 kare/s'de cikti vermiyor. Nesne takibi icin 5 (her donusten sonra yeni kare)
-fps = 5
+fps = 10
 # Kamera montaj acisi, saat yonunde: 0 / 90 / 180 / 270 (90 ve 270 yazilimda dondurulur)
 # Robotta kamera bas asagi takili ("Pi4 Fan" yazisiyla dogrulandi): 180 -> rpicam donanimda dondurur.
 # 180 derece sag/solu da degistirir; ayarsizken robot sola bakinca saga donuyordu.
@@ -177,16 +177,22 @@ center_tolerance = 0.08
 hfov_deg = 54
 # Yerde olculdu (MX1508, 2S, 2026-10-27): [guc %, 0.25 sn rampasiz darbede donus derecesi]
 # %24'te 3, %40'ta 14 derece; takipte hiz duzeyi ve "yavas" uygulanmaz
-turn_table = [[24, 3], [28, 5.5], [32, 8], [36, 11], [40, 14]]
+# Takip hep %40 ile doner, aci darbe suresiyle ayarlanir: %24-32'de disli motorlar esit donmuyor,
+# neredeyse durdugu oldu (olcum: [24, 3], [28, 5.5], [32, 8], [36, 11], [40, 14])
+turn_table = [[40, 14]]
+# Kucuk aci icin en kisa darbe (sn)
+pulse_min = 0.15
+# Robot durduktan bu kadar sonraki kareye bakilir (titreme/bulanma gecsin)
+settle_s = 0.1
 # Buyuk sapmada %40 ile darbe uzar, en fazla bu kadar
 pulse_max = 0.6
-# Her donusten sonra bu kadar durup dinle ("dur" duyulsun)
-listen_s = 0.8
+# Her donusten sonra kisa bakis payi; konusma kesilmez (kullanici konusurken takip donmez, hold_max_s)
+listen_s = 0.15
 # Hedef bu kadar gorunmezse aranir: son goruldugu yone search_steps kez donulur
-lost_s = 2.0
-search_steps = 8
-search_pulse = 0.5
-search_duty = 36
+lost_s = 1.0
+search_steps = 12
+search_pulse = 0.35
+search_duty = 45
 # Takilma: art arda bu kadar darbede donus beklenenin bu oranindan azsa takip durur
 stall_pulses = 3
 stall_ratio = 0.25
