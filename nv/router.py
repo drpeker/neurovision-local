@@ -141,6 +141,10 @@ def route(text: str) -> tuple[str, dict]:
     # --- safety first ---
     if _order(t, r"stop|halt|freeze|stay still|stand still|don't move|do not move") or t in ("wait", "enough"):
         return "stop", {}
+    # "Do you hear me? Stop.", "Don't follow me, stop": in a short sentence "stop" anywhere is an order
+    if len(t.split()) <= 8 and re.search(r"\b(stop|halt|freeze|stop following|don't follow|do not follow|"
+                                         r"stop moving|stop turning|stop the motors)\b", t):
+        return "stop", {}
     # A short "Stop!" often loses its first sound ("Top!", "Stopped", "Shop"); stopping is always safe
     if re.fullmatch(r"(top|tops|stopped|stops|stopping|shop|sup|stop it|top it|stoppit|hop|s top)( now| it| please)?", t):
         return "stop", {}

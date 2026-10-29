@@ -22,7 +22,7 @@ from .debug import DebugRecorder
 from .local_ai import LanguageModel, SpeechToText, TextToSpeech
 from .memory import Memory
 from .router import route
-from .vad import SpeechGate
+from .vad import SpeechGate, frame_db
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class LocalBrain:
         self._sentences: asyncio.Queue[str] = asyncio.Queue()
         self._speaking = False
         self._routing = False  # speech heard, not yet understood
+        # Motor noise in the mic while moving (dBFS, learnt while moving): speech must be above it
+        self._motor_db = cfg["vad"]["motor_noise_db"]
         d = cfg["debug"]
         self._rec = DebugRecorder(Path(d["dir"]), d["keep"]) if d["enabled"] else None
 
@@ -133,8 +135,21 @@ class LocalBrain:
         return self.gate.active or self._routing
 
     def _busy(self) -> bool:
-        return self._speaking or not self._sentences.empty() or self._speaker.busy \
-            or bool(self.motors and self.motors.busy)
+        """Half duplex for the robot's own voice only. The mic stays open while the motors run
+        (muting it then made "stop" go unheard during following); motor noise is handled by
+        _min_db instead."""
+        return self._speaking or not self._sentences.empty() or self._speaker.busy
+
+    def _min_db(self, frame: bytes) -> float | None:
+        """While the motors run, speech must be clearly louder than their noise."""
+        if not (self.motors and self.motors.moving):
+            return None
+        if not self.gate.active:
+            # Lower envelope of the noise: slow up, faster down, so speech over the motors does
+            # not raise it (rising with every loud frame it swallowed a "stop" said while turning)
+            db = frame_db(frame)
+            self._motor_db += (db - self._motor_db) * (0.005 if db > self._motor_db else 0.05)
+        return self._motor_db + self._cfg["vad"]["motor_margin_db"]
 
     # --- main loop ---
     async def run(self, llm_loading) -> None:
@@ -182,7 +197,7 @@ class LocalBrain:
                 self.gate.reset()
                 utterance.clear()
                 continue
-            frames, event = self.gate.feed(frame)
+            frames, event = self.gate.feed(frame, min_db=self._min_db(frame))
             if event == "start":
                 log.info("speech")
                 if self.face:

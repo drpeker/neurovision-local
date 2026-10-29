@@ -233,6 +233,10 @@ class Tracker:
         seen, last_t = None, self._camera.latest_at
         try:
             while not turn.done():
+                if self.hold and self.hold():
+                    # Kullanici konusmaya basladi: dur, cumle anlasilsin ("stop" ise takip zaten biter)
+                    log.info("takip: kullanici konusuyor, donus durduruldu")
+                    break
                 if self._camera.latest_at <= last_t:
                     await asyncio.sleep(0.01)
                     continue
@@ -244,7 +248,8 @@ class Tracker:
                     self.last_seen = time.monotonic()
                     imu_h = imu.heading
                     self.turner.target = imu_h + wrap(self._world - imu_h)
-            await turn
+            if turn.done():
+                await turn
         finally:
             if not turn.done():
                 turn.cancel()
@@ -277,11 +282,9 @@ class Tracker:
                             "I may need a restart.")
 
     async def _listen_gap(self, seconds: float) -> None:
-        """Hareketten sonra mikrofon motor susma payindan sonra acilir: o acildiktan sonra seconds dinle.
-
-        Yoksa ardi ardina donuslerde mikrofon hic acilmiyor, "stop" duyulmuyordu. Konusma baslarsa
-        _held sonraki donusu cumle anlasilana kadar bekletir."""
-        while self._motors.busy:
+        """Hareketten sonra kisa bak/dinle. Konusma baslarsa _held sonraki donusu cumle anlasilana
+        kadar bekletir (mikrofon motorlar donerken de acik; donus suruyorsa da kesilir)."""
+        while self._motors.moving:
             await asyncio.sleep(0.02)
         await asyncio.sleep(seconds)
 

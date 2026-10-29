@@ -68,6 +68,10 @@ margin_db = 15
 # Bu kadar konusma birikmeden modele hicbir sey gitmez; birikmezse ses atilir
 # 200: a one-word "Stop." is only ~240 ms above the threshold and was ignored at 300
 min_speech_ms = 200
+# Motorlar donerken mikrofon acik: konusma motor sesinden (dBFS, donerken ogrenilir; olculen ortanca
+# -26, en yuksek -18) bu kadar yuksek olmali
+motor_noise_db = -26
+motor_margin_db = 8
 # webrtcvad hassasiyeti 0-3; 3 boguk INMP441'de konusmanin ortasini da kesiyor
 aggressiveness = 2
 preroll_ms = 300
@@ -200,7 +204,7 @@ frame_lag_s = 0.05
 # Buyuk sapmada %40 ile darbe uzar, en fazla bu kadar
 pulse_max = 0.6
 # Her donusten sonra kisa bakis payi; konusma kesilmez (kullanici konusurken takip donmez, hold_max_s)
-listen_s = 0.4
+listen_s = 0.2
 # Hedef bu kadar gorunmezse aranir: son goruldugu yone search_steps kez donulur
 lost_s = 1.0
 search_steps = 12
@@ -211,7 +215,7 @@ search_duty = 45
 sweep_step_deg = 35
 # Hedef bundan hizli yana gidiyorduysa (derece/sn) kaybolunca gittigi tarafa aranir
 moving_dps = 8
-look_s = 0.4
+look_s = 0.3
 # Takilma: art arda bu kadar darbede donus beklenenin bu oranindan azsa takip durur
 stall_pulses = 3
 stall_ratio = 0.25

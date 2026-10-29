@@ -74,16 +74,19 @@ class SpeechGate:
             self.echo_ratio_db += (ratio - self.echo_ratio_db) * k
         return over
 
-    def _is_speech(self, frame: bytes, ref_db: float | None) -> tuple[bool, float]:
+    def _is_speech(self, frame: bytes, ref_db: float | None, min_db: float | None) -> tuple[bool, float]:
         db = frame_db(frame)
         # webrtcvad kendi icinde durum tutuyor: her karede cagrilmali, sonuc sonra birlestirilir
         voiced = self._vad.is_speech(frame, MIC_RATE)
         over_echo = self._over_echo(db, ref_db)
-        return voiced and over_echo and db >= self.floor_db + self._margin, db
+        loud = db >= max(self.floor_db + self._margin, min_db if min_db is not None else -200.0)
+        return voiced and over_echo and loud, db
 
-    def feed(self, frame: bytes, ref_db: float | None = None) -> tuple[list[bytes], str | None]:
-        """ref_db: hoparlorden su an calan radyonun seviyesi (yoksa None)."""
-        speech, db = self._is_speech(frame, ref_db)
+    def feed(self, frame: bytes, ref_db: float | None = None,
+             min_db: float | None = None) -> tuple[list[bytes], str | None]:
+        """ref_db: hoparlorden su an calan radyonun seviyesi (yoksa None).
+        min_db: konusma en az bu kadar yuksek olmali (motorlar donerken: motor sesi + pay)."""
+        speech, db = self._is_speech(frame, ref_db, min_db)
 
         if self.active:
             self._silent = 0 if speech else self._silent + 1
@@ -113,6 +116,6 @@ class SpeechGate:
         else:
             self._preroll.append(frame)
             # Ortam degisirse (klima, fan) taban yavasca yeni seviyeye kayar; radyo tabani bozmasin
-            if ref_db is None and db < self.floor_db + self._margin:
+            if ref_db is None and min_db is None and db < self.floor_db + self._margin:
                 self.floor_db += (db - self.floor_db) * FLOOR_ADAPT
         return [], None
