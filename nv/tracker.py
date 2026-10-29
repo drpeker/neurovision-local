@@ -173,9 +173,17 @@ class Tracker:
         elif moved > 1.6 * expected_deg:
             self._boost = max(0.6, self._boost * 0.8)
 
-    def _pick(self, found: list[Detection], prev_cx: float | None) -> Detection | None:
-        th = 0.0 if self.target == COLORED else self._cfg["target_threshold"]
-        cand = [d for d in found if d.name == self.target and d.conf >= th]
+    def _pick(self, found: list[Detection], prev_cx: float | None, locked: bool = False) -> Detection | None:
+        """locked: hedef ortadayken onceki konumunun yakininda model esigindeki zayif tanima da sayilir
+        (kapali TV gibi hedefler karelerin bir kisminda esigin altina dusuyor)."""
+        c = self._cfg
+        th = 0.0 if self.target == COLORED else c["target_threshold"]
+
+        def ok(d: Detection) -> bool:
+            if d.conf >= th:
+                return True
+            return locked and prev_cx is not None and abs(d.cx - prev_cx) < c["lock_tolerance"]
+        cand = [d for d in found if d.name == self.target and ok(d)]
         if self.color:
             # Renk istendiyse: o renk kutunun ortasinda baskin renklerden biri olmali
             cand = [d for d in cand if self.color in d.colors]
@@ -208,6 +216,9 @@ class Tracker:
         name = self._spoken()
         start = time.monotonic()
         prev_cx, last_dir, searched = None, -1 if side == "sol" else 1, 0
+        # Kilit: hedef ortalaninca robot durur; kucuk kaymalara (lock_tolerance) ve kacirilan karelere
+        # (lock_hold_s) donmez. Yoksa titreyen tanima her kayipta aramayi baslatip hedefi kadrajdan atiyordu
+        locked = False
         turned = None  # (donusten onceki sapma, beklenen derece)
         pulse = None  # (donusten onceki kare, beklenen derece): takilma kontrolu
         self._boost, self._stalls = 1.0, 0
@@ -225,7 +236,7 @@ class Tracker:
                     return
                 found = (await self._detector.find_color(jpeg, self.color) if target == COLORED
                          else await self._detector.detect(jpeg))
-                hit = self._pick(found, prev_cx)
+                hit = self._pick(found, prev_cx, locked)
                 if pulse:
                     # Hedef donusten once ve sonra gorunduyse kadrajdaki kaymasi donusu gosterir;
                     # buyuk donuste iki kare ortusmez, goruntu kaymasi ~0 olcup "takildi" diyordu
@@ -248,6 +259,9 @@ class Tracker:
                         return
                 now = time.monotonic()
                 if hit:
+                    if searched:
+                        # Aramadan sonra ilk donus: titrek tanimayla buyumus guc carpani hedefi gecirtiyordu
+                        self._boost, turned = 1.0, None
                     self.last_seen, searched = now, 0
                     e = hit.cx - 0.5  # <0: hedef goruntunun solunda
                     prev_cx = hit.cx
@@ -265,6 +279,13 @@ class Tracker:
                     elif lost:
                         await self._say(f"Found {name} again.")
                     lost = False
+                    if locked and abs(e) <= c["lock_tolerance"]:
+                        settled = now  # kilitli: kucuk kaymaya donme
+                        await asyncio.sleep(0.2)
+                        continue
+                    if locked:
+                        log.info("takip: kilit acildi (sapma %+.2f)", e)
+                        locked = False
                     if abs(e) > c["center_tolerance"]:
                         if await self._held():
                             settled = time.monotonic()  # beklerken hedef kaymis olabilir: yeni kare
@@ -275,12 +296,21 @@ class Tracker:
                         # Dinleme araligi: mikrofon acik kalsin, "dur" duyulsun
                         await asyncio.sleep(c["listen_s"])
                     else:
+                        log.info("takip: %s ortada, kilitlendi", target)
+                        locked = True
                         settled = now  # ortada: donme, yeni kareyi bekle
                         await asyncio.sleep(0.2)
                     continue
-                if self.last_seen and now - self.last_seen < c["lost_s"]:
-                    settled = now  # kisa kayip: bir kare daha bak
+                # Kilitliyken robot donmedi: hedef buyuk olasilikla hala orada, tanima kacirdi. Kisi
+                # yururken cikabilir; ona lost_s yeter
+                hold = c["lock_hold_s"] if locked and target != "person" else c["lost_s"]
+                if self.last_seen and now - self.last_seen < hold:
+                    settled = now
+                    await asyncio.sleep(0.2)
                     continue
+                if locked:
+                    log.info("takip: %s %.0f sn gorunmedi, kilit acildi", target, now - self.last_seen)
+                    locked = False
                 if await self._held():
                     settled = time.monotonic()
                     continue

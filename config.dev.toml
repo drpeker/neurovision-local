@@ -194,6 +194,10 @@ stall_ratio = 0.25
 still_diff = 8
 # Kullanici konusurken donus (takip ve arama) en fazla bu kadar bekler: donus mikrofonu kapatir
 hold_max_s = 8
+# Kilit: hedef ortalaninca bu sapmaya (genisligin orani) kadar donulmez; hedef (kisi degilse)
+# bu kadar gorunmezse aranmaz, robot bekler (kapali TV gibi hedefler bazi karelerde tanınmiyor)
+lock_tolerance = 0.15
+lock_hold_s = 6
 timeout_s = 60
 max_timeout_s = 300
 
