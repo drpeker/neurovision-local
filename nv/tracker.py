@@ -34,6 +34,7 @@ class Tracker:
         self._stalls = 0  # art arda donmeyen darbe sayisi
         self.face = None  # gozler hedefe baksin
         self.notify = None  # LiveBrain: kisa olay bildirimi (metin)
+        self.hold = None  # brain: kullanici konusuyor ya da sozu henuz anlasilmadi (bool donduren)
 
     @property
     def active(self) -> bool:
@@ -183,6 +184,19 @@ class Tracker:
         # Birden fazla varsa onceki konuma en yakini: kisiden kisiye atlamasin
         return min(cand, key=lambda d: abs(d.cx - prev_cx) - d.conf * 0.1)
 
+    async def _held(self) -> bool:
+        """Kullanici konusurken donme: donus mikrofonu kapatir ve yarim cumle atilir ("stop" duyulmaz).
+
+        Soz anlasilana kadar (en fazla hold_max_s) bekler; beklediyse True, kare eskidi.
+        """
+        if not (self.hold and self.hold()):
+            return False
+        deadline = time.monotonic() + self._cfg["hold_max_s"]
+        while self.hold() and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        log.debug("takip: kullanici konusurken beklendi")
+        return True
+
     async def _say(self, text: str) -> None:
         if self.notify:
             await self.notify(text)
@@ -248,6 +262,9 @@ class Tracker:
                         await self._say(f"Found {name} again.")
                     lost = False
                     if abs(e) > c["center_tolerance"]:
+                        if await self._held():
+                            settled = time.monotonic()  # beklerken hedef kaymis olabilir: yeni kare
+                            continue
                         turned = (e, await self.turn_toward(e))
                         pulse = (jpeg, turned[1], hit.box)
                         settled = await self._settle()
@@ -259,6 +276,9 @@ class Tracker:
                     continue
                 if self.last_seen and now - self.last_seen < c["lost_s"]:
                     settled = now  # kisa kayip: bir kare daha bak
+                    continue
+                if await self._held():
+                    settled = time.monotonic()
                     continue
                 if searched >= c["search_steps"]:
                     log.info("takip: %s bulunamadi, birakildi", target)

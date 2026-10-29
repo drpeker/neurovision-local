@@ -28,6 +28,8 @@ CASES = [
     ("Step back.", "move", {"direction": "geri"}), ("Walk me through the recipe.", "chat", {}),
     ("Come back.", "move", {"direction": "ileri"}), ("Come here.", "move", {"direction": "ileri"}), ("What's in front of you?", "look", {}),
     ("Do you see a phone?", "look", {"find": "cell phone"}), ("Can you see the orange?", "look", {"find": "orange"}),
+    ("Find and follow the television.", "track", {"target": "tv"}), ("Find the cup and follow it.", "track", {"target": "cup"}),
+    ("Look for the ball and track it.", "track", {"target": "sports ball"}),
     ("Louder please.", "volume", {"action": "artır"}), ("Set the volume to 40.", "volume", {"action": "ayarla", "level": 40}),
     ("Turn the volume down.", "volume", {"action": "azalt"}), ("What's your volume?", "volume", {"action": "sor"}),
     ("What is speaker and microphone volume levels? Tell me.", "levels", {}), ("What is your system volume labels?", "levels", {}),

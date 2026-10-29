@@ -145,9 +145,12 @@ def route(text: str) -> tuple[str, dict]:
         return "look", {"find": obj, "color": color}
 
     # --- following and turning to things ---
-    m = _order(t, r"follow|track|watch|keep an eye on|keep looking at")
+    # "Find and follow the TV", "Look for the ball and track it": the thing is before or after the verb
+    m = _order(t, r"(?:(?:go )?(?:find|look for|search for) ((?:\w+ ){0,3}?)and )?(?:follow|track|watch|keep an eye on|keep looking at)")
     if m:
         obj, color = _target(t[m.end():])
+        if obj is None and m.group(1):
+            obj, color = _target(m.group(1))
         return "track", {"target": obj, "color": color}
     m = _order(t, r"look at|turn to|turn towards|turn toward|face")
     if m:

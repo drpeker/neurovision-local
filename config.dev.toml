@@ -192,6 +192,8 @@ stall_pulses = 3
 stall_ratio = 0.25
 # ...ve hedef disindaki goruntu farki (0-255) bunun altindaysa; yerinde 2-6, 1 derece donus ~19 olculdu
 still_diff = 8
+# Kullanici konusurken donus (takip ve arama) en fazla bu kadar bekler: donus mikrofonu kapatir
+hold_max_s = 8
 timeout_s = 60
 max_timeout_s = 300
 

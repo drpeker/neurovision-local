@@ -66,6 +66,7 @@ class LocalBrain:
         self.motors = None
         self._sentences: asyncio.Queue[str] = asyncio.Queue()
         self._speaking = False
+        self._routing = False  # speech heard, not yet understood
         d = cfg["debug"]
         self._rec = DebugRecorder(Path(d["dir"]), d["keep"]) if d["enabled"] else None
 
@@ -83,6 +84,7 @@ class LocalBrain:
         self.actions.tracker = tracker
         self.body.tracker = tracker
         tracker.notify = self.notify
+        tracker.hold = self.hearing
 
     def attach_detector(self, detector) -> None:
         self.actions.detector = detector
@@ -119,6 +121,10 @@ class LocalBrain:
         await self._sentences.join()
         while self._speaker.busy:
             await asyncio.sleep(0.05)
+
+    def hearing(self) -> bool:
+        """The user is speaking, or what they said is not understood yet: following waits with turns."""
+        return self.gate.active or self._routing
 
     def _busy(self) -> bool:
         return self._speaking or not self._sentences.empty() or self._speaker.busy \
@@ -181,7 +187,11 @@ class LocalBrain:
                     self._rec.start(utterance)
                     self._rec.end()
                 pcm, utterance = b"".join(utterance), []
-                await self._handle(pcm)
+                self._routing = True
+                try:
+                    await self._handle(pcm)
+                finally:
+                    self._routing = False
                 # Drop audio that arrived while thinking; it was not meant as a new request
                 while not self._mic.frames.empty():
                     self._mic.frames.get_nowait()
@@ -207,6 +217,7 @@ class LocalBrain:
         self._memory.add_turn("user", text)
 
         tool, args = route(text)
+        self._routing = False  # understood: following may turn again (a "stop" has already been routed)
         log.info("heard %r (%.1f s audio, %.2f s, confidence %.2f) -> %s %s",
                  text, len(pcm) / 32000, heard_s, confidence, tool, args or "")
 
