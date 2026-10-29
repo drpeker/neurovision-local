@@ -241,10 +241,6 @@ class LocalBrain:
             log.info("nothing recognised (%.2f s)", heard_s)
             if self.face:
                 self.face.thinking = False
-            if self._following():
-                # Said while following and not understood: on the robot this was nearly always a
-                # "stop" (Parakeet often returns nothing for a short "Stop."). Stopping is safe.
-                await self._stop_following(time.monotonic() - t0)
             return
         if self.face:
             self.face.caption(text, "user")
@@ -259,10 +255,6 @@ class LocalBrain:
 
         if tool == "stop":
             answer = await self.actions.run(tool, args)  # never doubted: stopping is always safe
-        elif self._following() and (tool in GUARDED and confidence < self._min_command
-                                    or tool == "chat" and confidence < self._min_chat):
-            await self._stop_following(time.monotonic() - t0)
-            return
         elif tool in RISKY and confidence < self._min_risky or tool in GUARDED and confidence < self._min_command:
             answer = "Sorry, I'm not sure I heard that right. Please say it again."
         elif tool == "chat" and confidence < self._min_chat:
@@ -279,13 +271,6 @@ class LocalBrain:
         self._memory.add_turn("robot", answer)
         await self._wait_spoken()
         log.info("turn done in %.1f s, listening", time.monotonic() - t0)
-
-    async def _stop_following(self, after_s: float) -> None:
-        await self.actions.run("stop", {})
-        answer = "I stopped. Say follow again to go on."
-        self.say(answer)
-        log.info("answer (%.1f s after speech): %s", after_s, answer)
-        await self._wait_spoken()
 
     async def _chat(self, text: str) -> str:
         """Qwen answers; a few notes (matching memories, what it just saw) go with the question."""
