@@ -216,6 +216,22 @@ lock_hold_s = 6
 timeout_s = 60
 max_timeout_s = 300
 
+[imu]
+# MPU6050 (I2C-1, 0x68): robotun yonu ve aciyla donus (nv/imu.py)
+enabled = true
+bus = 1
+# Aciyla donus: buyuk acida %50, son derecelerde ve duzeltmede %40 (daha dusukte disli motorlar
+# esit donmuyor); hedefe bu kadar yakinsa tamam, en fazla max_corrections kez duzeltilir
+duty_fast = 50
+duty = 40
+slow_below_deg = 25
+tolerance_deg = 2
+max_corrections = 3
+# Durdurma ile tam durus arasi kayma: hiz (derece/sn) x coast_s derece; donuslerde ogrenilir
+coast_s = 0.1
+settle_s = 0.4
+max_seconds = 3.0
+
 [memory]
 # Pi'de yerel SQLite; git disinda
 db = "data/memory.db"
