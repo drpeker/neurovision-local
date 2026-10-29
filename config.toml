@@ -154,6 +154,10 @@ max_seconds = 3.0
 # En kisa hareket; model "biraz" icin 0.2 sn seciyor
 min_seconds = 0.25
 reverse_pause_ms = 150
+# Duz gidiste jiroskopla yon tutma (MPU6050 varsa): 1 derece sapmada paletlerin gucu bu oranda
+# ayrisir, en fazla steer_max
+steer_per_deg = 0.04
+steer_max = 0.3
 # Motor durduktan sonra mikrofon bu kadar daha kapali (ms)
 mute_tail_ms = 400
 # Bu sicaklikta ya da dusuk voltajda hiz bu oranla carpilir
@@ -202,6 +206,12 @@ lost_s = 1.0
 search_steps = 12
 search_pulse = 0.35
 search_duty = 45
+# MPU6050 varsa arama: once hedefin son goruldugu yone, orada yoksa ciktigi tarafa bu kadar
+# derecelik adimlarla (kadrajin ~2/3'u, aradan kacmaz) en fazla bir tur; her adimda look_s bakilir
+sweep_step_deg = 35
+# Hedef bundan hizli yana gidiyorduysa (derece/sn) kaybolunca gittigi tarafa aranir
+moving_dps = 8
+look_s = 0.3
 # Takilma: art arda bu kadar darbede donus beklenenin bu oranindan azsa takip durur
 stall_pulses = 3
 stall_ratio = 0.25
@@ -231,6 +241,9 @@ max_corrections = 3
 coast_s = 0.1
 settle_s = 0.4
 max_seconds = 3.0
+# Donerken motora guc gidiyor ama stall_s sonra hala bundan yavassa robot takilmistir
+stall_s = 0.5
+stall_dps = 5
 
 [memory]
 # Pi'de yerel SQLite; git disinda

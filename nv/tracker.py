@@ -11,9 +11,11 @@ palet sikisti) takip durur. Hedefin az kaymasi yetmez: kisi robotla birlikte yur
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 
+from .imu import wrap
 from .vision import COCO80, COLORED, COLORS, Detection, Detector, turkish
 
 # Spoken (English) colour names for the local brain's events
@@ -36,6 +38,10 @@ class Tracker:
         self.face = None  # gozler hedefe baksin
         self.notify = None  # LiveBrain: kisa olay bildirimi (metin)
         self.hold = None  # brain: kullanici konusuyor ya da sozu henuz anlasilmadi (bool donduren)
+        self.turner = None  # nv.imu.AngleTurner (MPU6050): donusler aciyla, takilma jiroskopla
+        self._world: float | None = None  # hedefin yonu (jiroskop derecesi, sola pozitif)
+        self._world_v = 0.0  # hedefin acisal hizi (derece/sn): hizla cikan kisinin gittigi taraf
+        self._world_at = 0.0
 
     @property
     def active(self) -> bool:
@@ -218,6 +224,58 @@ class Tracker:
         # Birden fazla varsa onceki konuma en yakini: kisiden kisiye atlamasin
         return min(cand, key=lambda d: abs(d.cx - prev_cx) - d.conf * 0.1)
 
+    async def _gyro_turn(self, goal: float, prev_cx: float | None) -> tuple[Detection | None, bool]:
+        """Jiroskopla goal yonune don; donerken her yeni karede bak, hedef gorulurse yonu
+        (karenin cekildigi andaki robot yonu + kadrajdaki sapma) donus hedefi olur: hareket eden
+        hedef de yakalanir. (son gorulen, takildi mi) dondurur."""
+        c, imu = self._cfg, self.turner.imu
+        turn = asyncio.create_task(self.turner.turn_to(goal, settle=False), name="tracker-turn")
+        seen, last_t = None, self._camera.latest_at
+        try:
+            while not turn.done():
+                if self._camera.latest_at <= last_t:
+                    await asyncio.sleep(0.01)
+                    continue
+                last_t = self._camera.latest_at
+                hit = self._pick(await self._find(self._camera.frame()), prev_cx)
+                if hit:
+                    seen, prev_cx = hit, hit.cx
+                    self._set_world(self._world_of(hit, last_t), last_t)
+                    self.last_seen = time.monotonic()
+                    imu_h = imu.heading
+                    self.turner.target = imu_h + wrap(self._world - imu_h)
+            await turn
+        finally:
+            if not turn.done():
+                turn.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await turn
+        return seen, self.turner.stalled
+
+    def _set_world(self, world: float, at: float) -> None:
+        if self._world is not None and 0.05 < at - self._world_at < 1.0:
+            v = wrap(world - self._world) / (at - self._world_at)
+            self._world_v += 0.5 * (v - self._world_v)
+        self._world, self._world_at = world, at
+
+    def _world_of(self, hit: Detection, frame_at: float) -> float:
+        c = self._cfg
+        return self.turner.imu.heading_at(frame_at - c["frame_lag_s"]) - (hit.cx - 0.5) * c["hfov_deg"]
+
+    async def _find(self, jpeg: bytes) -> list[Detection]:
+        return (await self._detector.find_color(jpeg, self.color) if self.target == COLORED
+                else await self._detector.detect(jpeg))
+
+    async def _report_stall(self) -> None:
+        log.warning("takip durdu: motorlar donmuyor (batarya/koruma/sikisma?)")
+        check = await self._motors.signal_check()
+        if check["pwm_sinyali"] == "var":
+            await self._say("I stopped following: my motors get power signals but I can't "
+                            "turn. Please check the motor battery.")
+        else:
+            await self._say("I stopped following: no signal reaches my motor pins. "
+                            "I may need a restart.")
+
     async def _held(self) -> bool:
         """Kullanici konusurken donme: donus mikrofonu kapatir ve yarim cumle atilir ("stop" duyulmaz).
 
@@ -248,6 +306,7 @@ class Tracker:
         self._boost, self._stalls = 1.0, 0
         # Hedefin tahmini sapmasi: gorulunce olculur, donuldukce kaydirilir; kaybolunca arama yonu bu
         self._est_e = -0.3 if side == "sol" else 0.3
+        self._world, self._world_v, self._world_at = None, 0.0, 0.0
         self.last_seen = 0.0
         announced = lost = False  # lost: "kayboldu" denildi, bulununca "tekrar bulundu" denir
         try:
@@ -256,13 +315,12 @@ class Tracker:
             while (time.monotonic() - max(start, self.last_seen) < seconds
                    and time.monotonic() - start < c["max_timeout_s"]):
                 jpeg = await self._frame_after(settled)
+                frame_at = self._camera.latest_at
                 if not jpeg:
                     log.warning("takip: kamera karesi yok")
                     await self._say("I stopped following: my camera is not giving me a picture.")
                     return
-                found = (await self._detector.find_color(jpeg, self.color) if target == COLORED
-                         else await self._detector.detect(jpeg))
-                hit = self._pick(found, prev_cx, locked)
+                hit = self._pick(await self._find(jpeg), prev_cx, locked)
                 if pulse:
                     # Hedef donusten once ve sonra gorunduyse kadrajdaki kaymasi donusu gosterir;
                     # buyuk donuste iki kare ortusmez, goruntu kaymasi ~0 olcup "takildi" diyordu
@@ -274,20 +332,15 @@ class Tracker:
                     moved = await self._moved(pulse[0], jpeg, pulse[1], target_deg, boxes)
                     pulse = None
                     if not moved:
-                        log.warning("takip durdu: motorlar donmuyor (batarya/koruma/sikisma?)")
-                        check = await self._motors.signal_check()
-                        if check["pwm_sinyali"] == "var":
-                            await self._say("I stopped following: my motors get power signals but I can't "
-                                            "turn. Please check the motor battery.")
-                        else:
-                            await self._say("I stopped following: no signal reaches my motor pins. "
-                                            "I may need a restart.")
+                        await self._report_stall()
                         return
                 now = time.monotonic()
                 if hit:
                     self.last_seen, searched = now, 0
                     e = hit.cx - 0.5  # <0: hedef goruntunun solunda
                     prev_cx, self._est_e, turned = hit.cx, e, None
+                    if self.turner:
+                        self._set_world(self._world_of(hit, frame_at), frame_at)
                     if self.face:
                         self.face.gaze(e)
                     if not announced:
@@ -306,6 +359,15 @@ class Tracker:
                     if abs(e) > c["center_tolerance"]:
                         if await self._held():
                             settled = time.monotonic()  # beklerken hedef kaymis olabilir: yeni kare
+                            continue
+                        if self.turner:
+                            seen, stalled = await self._gyro_turn(self._world, prev_cx)
+                            if stalled:
+                                await self._report_stall()
+                                return
+                            prev_cx = seen.cx if seen else prev_cx
+                            settled = time.monotonic()
+                            await asyncio.sleep(c["listen_s"])
                             continue
                         t0 = time.monotonic()
                         turned = (e, await self.turn_toward(e))
@@ -335,12 +397,21 @@ class Tracker:
                 if locked:
                     log.info("takip: %s %.0f sn gorunmedi, kilit acildi", target, now - self.last_seen)
                     locked = False
-                if searched == 0 and abs(self._est_e) > 0.02:
+                if searched == 0 and self.turner and self._world is not None:
+                    gap = wrap(self._world - self.turner.imu.heading)  # sola pozitif
+                    if abs(self._world_v) > c["moving_dps"]:
+                        last_dir = -1 if self._world_v > 0 else 1  # hareket eden hedef: gittigi tarafa
+                    elif abs(gap) > 2:
+                        last_dir = -1 if gap > 0 else 1  # hedefin goruldugu yon tarafina
+                    elif prev_cx is not None and abs(prev_cx - 0.5) > 0.02:
+                        last_dir = -1 if prev_cx < 0.5 else 1  # kadrajdan ciktigi taraf
+                elif searched == 0 and abs(self._est_e) > 0.02:
                     last_dir = -1 if self._est_e < 0 else 1  # hedefin tahmini yerine dogru ara
                 if await self._held():
                     settled = time.monotonic()
                     continue
-                if searched >= c["search_steps"]:
+                steps = int(360 / c["sweep_step_deg"]) + 1 if self.turner else c["search_steps"]
+                if searched >= steps:
                     log.info("takip: %s bulunamadi, birakildi", target)
                     await self._say(f"I couldn't find {name}, so I stopped following.")
                     return
@@ -348,6 +419,18 @@ class Tracker:
                     lost = True
                     await self._say(f"I lost {name}. Looking around.")
                 searched += 1
+                if self.turner:
+                    # Once hedefin son goruldugu yone; orada yoksa ciktigi tarafa adim adim, en fazla bir tur
+                    h = self.turner.imu.heading
+                    far = self._world is not None and abs(wrap(self._world - h)) > c["hfov_deg"] * 0.3
+                    goal = self._world if searched == 1 and far else h - last_dir * c["sweep_step_deg"]
+                    seen, stalled = await self._gyro_turn(goal, None)
+                    if stalled:
+                        await self._report_stall()
+                        return
+                    settled = time.monotonic()
+                    await asyncio.sleep(c["look_s"])
+                    continue
                 duty = c["search_duty"]
                 # Aramada takilma kontrolu yok: hedef cikinca kamera cogu zaman duz duvara bakar,
                 # goruntu kaymasi olculemez (~0 derece) ve donen robot "takildi" sayiliyordu

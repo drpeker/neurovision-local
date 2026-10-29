@@ -43,6 +43,8 @@ class Motors:
         self._stopped_at = 0.0
         self._moving_until = 0.0
         self._quiet_until = 0.0
+        self.imu = None  # robot.py: nv.imu.Imu varsa duz gidiste yon korunur
+        self._steer = 0.0  # duz gidiste yon duzeltmesi: sol guc x (1+steer), sag x (1-steer)
         log.info("motorlar hazir: %s, hiz duzeyi %%%d (sol A, sag B%s)", cfg["driver"],
                  self.speed_level, " ters" if cfg["right"]["invert"] else "")
 
@@ -119,9 +121,9 @@ class Motors:
 
     def _set(self, left: int, right: int, duty: float) -> None:
         # trim: motorlar ayni gucte ayni hizda donmuyor; yavas tarafin gucu bu oranla carpilir
-        for name, direction in (("sol", left), ("sag", right)):
+        for name, direction, k in (("sol", left, 1 + self._steer), ("sag", right, 1 - self._steer)):
             side = self._sides[name]
-            self._drive(side, direction, duty * side.get("trim", 1.0))
+            self._drive(side, direction, duty * side.get("trim", 1.0) * k)
 
     def halt(self) -> None:
         """Senkron, aninda dur (cikis, hata, baglanti kopmasi)."""
@@ -196,11 +198,27 @@ class Motors:
                 k = seconds * 0.6 / (up + down)
                 up, down = up * k, down * k
             start = min(c["ramp_start"], duty)
+            heading = self.imu.heading if self.imu else None
             await self._ramp(dirs, start, duty, up)
-            await asyncio.sleep(seconds - up - down)
+            if heading is not None and dirs[0] == dirs[1]:
+                await self._hold_heading(dirs, duty, heading, seconds - up - down)
+            else:
+                await asyncio.sleep(seconds - up - down)
             await self._ramp(dirs, duty, start, down)
         finally:
+            self._steer = 0.0
             self.halt()
+
+    async def _hold_heading(self, dirs: tuple[int, int], duty: float, heading: float, seconds: float) -> None:
+        """Duz gidiste jiroskopla yonu koru: sola kaydiysa sol palet hizlanir, sag yavaslar (geride tersi)."""
+        c = self._cfg
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            drift = self.imu.heading - heading  # sola pozitif
+            steer = max(-c["steer_max"], min(c["steer_max"], c["steer_per_deg"] * drift))
+            self._steer = steer if dirs[0] > 0 else -steer
+            self._set(*dirs, duty)
+            await asyncio.sleep(min(0.02, max(0.0, end - time.monotonic())))
 
     async def _ramp(self, dirs: tuple[int, int], start: float, end: float, seconds: float) -> None:
         step = RAMP_STEP_S

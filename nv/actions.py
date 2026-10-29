@@ -78,6 +78,8 @@ class Actions:
         self.motors = None
         self.tracker = None
         self.detector = None
+        self.turner = None  # nv.imu.AngleTurner (MPU6050): turns by angle instead of by time
+        self._turn_task: asyncio.Task | None = None
         self.on_shutdown = None  # robot.py: on_shutdown("robot" | "sistem")
         self.wait_spoken = None  # brain: coroutine that returns when speech has finished
         self.last_seen: tuple[float, str] | None = None  # (time, description) for the LLM's notes
@@ -92,7 +94,16 @@ class Actions:
             return "Sorry, that did not work."
 
     # --- movement ---
+    async def _cancel_turn(self) -> None:
+        if self._turn_task and not self._turn_task.done():
+            self._turn_task.cancel()
+            try:
+                await self._turn_task
+            except asyncio.CancelledError:
+                pass
+
     async def _stop(self) -> str:
+        await self._cancel_turn()
         if self.tracker and self.tracker.active:
             await self.tracker.stop()
         if not self.motors:
@@ -100,11 +111,17 @@ class Actions:
         await self.motors.stop()
         return "Stopped."
 
-    async def _move(self, direction: str, seconds: float, speed: str = "normal") -> str:
+    async def _move(self, direction: str, seconds: float, speed: str = "normal", degrees: float | None = None) -> str:
         if not self.motors:
             return "My motors are not connected."
         if self.tracker and self.tracker.active:
             await self.tracker.stop()  # driving by hand ends tracking
+        await self._cancel_turn()
+        if self.turner and direction in ("sol", "sag") and degrees:
+            # By the gyro: the turn runs on while the robot answers; "stop" cancels it
+            sign = 1 if direction == "sol" else -1
+            self._turn_task = asyncio.create_task(self.turner.turn(sign * degrees), name="turn")
+            return DIRECTIONS[direction]
         result = await self.motors.move(direction, max(0.25, min(3.0, seconds)), speed)
         return DIRECTIONS[direction] if "error" not in result else "I can't move that way."
 
@@ -113,6 +130,7 @@ class Actions:
             return "I can't follow things right now; my camera or motors are not ready."
         if not target:
             return "I can only follow things I recognise, like a person, a cup or a bottle."
+        await self._cancel_turn()  # one owner of the motors at a time
         result = await self.tracker.start(target, color=color, side=side)
         if "error" in result:
             return "I can't follow that."
@@ -137,7 +155,12 @@ class Actions:
         e = max(hits, key=lambda d: d.conf).cx - 0.5
         if abs(e) <= self._cfg["vision"]["center_tolerance"]:
             return f"The {target} is right in front of me."
-        await self.tracker.turn_toward(e)
+        if self.turner:
+            await self._cancel_turn()
+            self._turn_task = asyncio.create_task(self.turner.turn(-e * self._cfg["vision"]["hfov_deg"]),
+                                                  name="turn")
+        else:
+            await self.tracker.turn_toward(e)
         return f"Turning to the {target}."
 
     # --- seeing ---

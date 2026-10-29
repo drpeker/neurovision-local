@@ -115,6 +115,7 @@ async def run(cfg: dict) -> None:
         brain = LocalBrain(cfg, mic, speaker, camera, memory)
         face = await make_face(cfg, speaker, brain)
         motors = make_motors(cfg, brain, memory)
+        imu = await make_imu(cfg, motors, brain)
         tracker = make_vision(cfg, camera, motors, brain, face)
         # Commands need only Whisper (~12 s); Qwen takes ~36 s to load from the SD card and is
         # only needed for chat, so the robot starts listening without waiting for it
@@ -142,6 +143,8 @@ async def run(cfg: dict) -> None:
                 await tracker.stop()
             if motors:
                 motors.close()  # motors first: always stop
+            if imu:
+                imu.stop()
             if face:
                 await face.stop()
     finally:
@@ -195,6 +198,24 @@ def make_motors(cfg: dict, brain, memory):
         motors.speed_level = int(saved)
     brain.attach_motors(motors)
     return motors
+
+
+async def make_imu(cfg: dict, motors, brain):
+    """MPU6050: turns by angle and straight driving that holds its heading. Without it (or if it
+    does not answer) the robot moves by time and power as before."""
+    if not (cfg.get("imu", {}).get("enabled") and motors):
+        return None
+    from nv.imu import AngleTurner, Imu
+    try:
+        imu = Imu(cfg["imu"]["bus"])
+        await asyncio.to_thread(imu.calibrate)  # the robot is standing still at start
+    except Exception as e:
+        log.warning("MPU6050 did not answer, moving by time and power: %s", e)
+        return None
+    imu.start()
+    motors.imu = imu
+    brain.attach_turner(AngleTurner(imu, motors, cfg["imu"]))
+    return imu
 
 
 async def make_face(cfg: dict, speaker: Speaker, brain):

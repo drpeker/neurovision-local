@@ -64,6 +64,7 @@ class LocalBrain:
         self._llm_ready = False
         self.face = None
         self.motors = None
+        self._turner = None  # nv.imu.AngleTurner when the MPU6050 is there
         self._sentences: asyncio.Queue[str] = asyncio.Queue()
         self._speaking = False
         self._routing = False  # speech heard, not yet understood
@@ -80,7 +81,12 @@ class LocalBrain:
         self.actions.motors = motors
         self.body.motors = motors
 
+    def attach_turner(self, turner) -> None:
+        self.actions.turner = turner
+        self._turner = turner
+
     def attach_tracker(self, tracker) -> None:
+        tracker.turner = self._turner
         self.actions.tracker = tracker
         self.body.tracker = tracker
         tracker.notify = self.notify

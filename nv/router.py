@@ -69,6 +69,35 @@ def _seconds(t: str) -> float:
     return 1.0
 
 
+DEGREE_WORDS = {"ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "forty five": 45, "forty": 40,
+                "forty-five": 45, "sixty": 60, "ninety": 90, "one hundred eighty": 180, "a hundred and eighty": 180,
+                "one hundred and eighty": 180, "hundred eighty": 180, "two seventy": 270, "three sixty": 360,
+                "three hundred sixty": 360, "three hundred and sixty": 360}
+
+
+def _degrees(t: str) -> float:
+    """How far to turn: said in degrees, as a part of a circle, as a time or as "a little"."""
+    m = re.search(r"(\d{1,3})\s*(?:degrees?|deg)\b", t)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"\b(" + "|".join(sorted(DEGREE_WORDS, key=len, reverse=True)) + r")\s*degrees?\b", t)
+    if m:
+        return float(DEGREE_WORDS[m.group(1)])
+    if re.search(r"\b(full circle|full turn|all the way around|360)\b", t):
+        return 360.0
+    if re.search(r"\b(around|half (a )?turn|half circle|other way|u turn)\b", t):
+        return 180.0
+    if re.search(r"\bquarter( turn)?\b", t):
+        return 90.0
+    if re.search(r"\bseconds?\b", t):
+        return min(360.0, 60.0 * _seconds(t))
+    if re.search(r"\b(a little|a bit|a little bit|slightly|a tiny bit|bit)\b", t):
+        return 20.0
+    if re.search(r"\b(a lot|far|more|sharply|hard)\b", t):
+        return 90.0
+    return 45.0
+
+
 def _speed(t: str) -> str:
     if re.search(r"\bvery slow(ly)?\b", t):
         return "çok yavaş"
@@ -222,6 +251,12 @@ def route(text: str) -> tuple[str, dict]:
                 direction = "ileri"
         if not direction and _order(t, r"back up|back off|reverse|go back|move back|backward|backwards"):
             direction = "geri"
+        # "Turn around" has no side: a half turn to the left
+        if not direction and _order(t, r"turn|spin|rotate") and re.search(r"\b(around|other way|u turn|full circle)\b", t):
+            direction = "sol"
+        if direction in ("sol", "sag"):
+            return "move", {"direction": direction, "seconds": _seconds(t), "speed": _speed(t),
+                            "degrees": _degrees(t)}
         if direction:
             return "move", {"direction": direction, "seconds": _seconds(t), "speed": _speed(t)}
 
