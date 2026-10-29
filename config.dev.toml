@@ -229,6 +229,24 @@ hold_max_s = 8
 # bu kadar gorunmezse aranmaz, robot bekler (kapali TV gibi hedefler bazi karelerde tanınmiyor)
 lock_tolerance = 0.15
 lock_hold_s = 6
+# Kisi takibi (sonar gerekir): durmadan surer, follow_cm'de bekler. Uzaksa ileri (follow_duty,
+# her 10 cm icin follow_duty_per_10cm fazla, en fazla follow_duty_max), yakinsa geri
+# (follow_back_duty); arada (+-follow_band_cm) durur. Kisinin kadrajdaki yeri egri cizdirir
+# (follow_steer x sapma); sapma follow_turn_e'den buyukse durup doner. Sonar bos ise uzak sayilir
+# (follow_far_cm), kisi kadrajin follow_box_h'sini doldurmuyorsa. Takip follow_hold_s icinde yeni
+# komut vermezse motorlar kendiliginden durur. follow_cm = 0: yalnizca doner.
+follow_cm = 30
+follow_band_cm = 5
+follow_duty = 32
+follow_duty_per_10cm = 1.5
+follow_duty_max = 50
+follow_back_duty = 34
+follow_far_cm = 200
+follow_steer = 0.8
+follow_steer_max = 0.35
+follow_turn_e = 0.3
+follow_box_h = 0.95
+follow_hold_s = 0.6
 timeout_s = 60
 max_timeout_s = 300
 

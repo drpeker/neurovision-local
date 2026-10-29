@@ -1,4 +1,6 @@
-"""Nesne takibi: robot yalnizca yerinde donerek hedefi kadrajin ortasinda tutar.
+"""Nesne takibi: robot yerinde donerek hedefi kadrajin ortasinda tutar. Kisi takibinde ayrica
+durmadan surer: her karede sonar mesafesine gore ileri/geri, kisinin kadrajdaki yerine gore egri
+cizerek; follow_cm'de bekler (sonar gerekir).
 
 Dongu: robot durunca cekilen kare -> YOLO -> hedefin yatay konumu -> ortadan sapma kadar donus
 darbesi. Donerken de her yeni kareye bakilir: hedef ortaya gelince (ya da aramada gorununce)
@@ -301,6 +303,44 @@ class Tracker:
         log.debug("takip: kullanici konusurken beklendi")
         return True
 
+    async def _follow(self, hit: Detection, e: float) -> bool:
+        """Kisi takibi, bir kare: sure ya da dur. Surus komutu verildiyse True (sonraki kare hemen).
+
+        Mesafe sonardan (sonar bir sey gormuyorsa uzak sayilir, kutu kadraji doldurmuyorsa):
+        follow_cm + follow_band_cm'den uzaksa ileri, follow_cm - follow_band_cm'den yakinsa geri;
+        arada durur. Kisi cok yandaysa (follow_turn_e) durup jiroskopla doner (False).
+        """
+        c, motors = self._cfg, self._motors
+        sonar = motors.sonar
+        if self.target != "person" or not sonar or not c.get("follow_cm"):
+            return False
+        d = sonar.distance
+        if d is None:
+            way = 0 if hit.box[3] - hit.box[1] >= c["follow_box_h"] else 1
+        elif d > c["follow_cm"] + c["follow_band_cm"]:
+            way = 1
+        elif d < c["follow_cm"] - c["follow_band_cm"]:
+            way = -1
+        else:
+            way = 0
+        if way == 0 or abs(e) > c["follow_turn_e"] or (self.hold and self.hold()):
+            if motors.driving:
+                await motors.stop(quiet=True)
+            return False
+        if way > 0:
+            # Uzaklastikca hizlan: follow_duty'den, her 10 cm icin follow_duty_per_10cm fazla
+            far = c["follow_far_cm"] if d is None else d
+            duty = min(c["follow_duty_max"],
+                       c["follow_duty"] + (far - c["follow_cm"]) / 10 * c["follow_duty_per_10cm"])
+        else:
+            duty = c["follow_back_duty"]
+        # Kisi sagdaysa (e > 0) sola palet hizlansin; geri giderken tersi (onu kisiye doner)
+        steer = max(-c["follow_steer_max"], min(c["follow_steer_max"], c["follow_steer"] * e * way))
+        if not motors.driving:
+            log.info("takip: %s (sonar %s)", "kisiye yaklasiyor" if way > 0 else "geri cekiliyor",
+                     "bos" if d is None else f"{d:.0f} cm")
+        return await motors.drive(way, duty, steer, c["follow_hold_s"])
+
     async def _say(self, text: str) -> None:
         if self.notify:
             await self.notify(text)
@@ -327,6 +367,8 @@ class Tracker:
             while (time.monotonic() - max(start, self.last_seen) < seconds
                    and time.monotonic() - start < c["max_timeout_s"]):
                 if self.hold and self.hold():
+                    if self._motors.driving:
+                        await self._motors.stop(quiet=True)
                     # Kullanici konusuyor: bakmayi da durdur, isleyici konusma tanimaya kalsin
                     # (YOLO ile ayni anda 11 sn'lik konusmanin tanimasi 10 sn surdu)
                     await asyncio.sleep(0.05)
@@ -367,6 +409,10 @@ class Tracker:
                     elif lost:
                         await self._say(f"Found {name} again.")
                     lost = False
+                    if await self._follow(hit, e):
+                        locked = False
+                        settled = time.monotonic() - c["settle_s"]  # suruyor: bir sonraki kare yeter
+                        continue
                     if locked and abs(e) <= c["lock_tolerance"]:
                         settled = now  # kilitli: kucuk kaymaya donme
                         await asyncio.sleep(0.2)
@@ -405,6 +451,8 @@ class Tracker:
                         settled = now  # ortada: donme, yeni kareyi bekle
                         await asyncio.sleep(0.2)
                     continue
+                if self._motors.driving:
+                    await self._motors.stop(quiet=True)  # kisi gorunmuyor: korlemesine surme
                 # Kilitliyken robot donmedi: hedef buyuk olasilikla hala orada, tanima kacirdi. Kisi
                 # yururken cikabilir; ona lost_s yeter
                 hold = c["lock_hold_s"] if locked and target != "person" else c["lost_s"]

@@ -41,7 +41,7 @@ TENS = {"ten": 10, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty"
         "eighty": 80, "ninety": 90, "hundred": 100}
 
 # A request may be polite ("can you turn left?"); a question about something is not a command
-POLITE = r"^(?:hey |ok |okay |please |now |neurovision |robot )*(?:can you |could you |would you |will you )?(?:please )?"
+POLITE = r"^(?:hey |hi |hello |ok |okay |please |now |neurovision |robot )*(?:can you |could you |would you |will you )?(?:please )?"
 QUESTION = re.compile(r"^(how|why|what|when|where|who|which|do|does|did|is|are|was|tell me)\b")
 
 

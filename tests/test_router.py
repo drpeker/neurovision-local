@@ -82,6 +82,8 @@ CASES = [
     ("Measure the distance.", "distance", {}), ("Is there anything in front of you?", "distance", {}),
     ("How far away is it?", "distance", {}), ("How far is Istanbul from Ankara?", "chat", {}),
     ("What do you see in front of you?", "look", {}),
+    ("Hello, follow me.", "track", {"target": "person"}), ("Hi robot, turn left.", "move", {"direction": "sol"}),
+    ("Hello, what's your name?", "chat", {}),
 ]
 
 bad = 0

@@ -43,6 +43,7 @@ class Motors:
                 lgpio.gpio_claim_output(self._h, side[key], 0)
         self._pwm_pin: dict[int, int | None] = {}  # MX1508: taraf (in1) -> PWM verilen pin
         self.speed_level = cfg["speed_level"]
+        self._derate_k = 1.0  # surekli surusta her komutta sicaklik olculmez; move() gunceller
         self._task: asyncio.Task | None = None
         self._prev_dir: tuple[int, int] = (0, 0)  # son hareketin yonu (durunca sifirlanmaz)
         self._stopped_at = 0.0
@@ -53,6 +54,7 @@ class Motors:
         self.sonar = None  # robot.py: nv.sonar.Sonar varsa ileri giderken engelde durur
         self.stop_cm = 25.0
         self.on_obstacle = None  # robot.py: on_obstacle(cm), engel yuzunden durunca (soylemek icin)
+        self._drive_cmd: list | None = None  # surekli surus: [yonler, guc, yon duzeltmesi, bitis]
         log.info("motorlar hazir: %s, hiz duzeyi %%%d (sol A, sag B%s)", cfg["driver"],
                  self.speed_level, " ters" if cfg["right"]["invert"] else "")
 
@@ -196,7 +198,8 @@ class Motors:
         if spoken_turn:
             target = max(target, c.get("turn_min_speed", 0))
             soft = False
-        duty = max(target * self._derate(), c["min_speed"])
+        self._derate_k = self._derate()
+        duty = max(target * self._derate_k, c["min_speed"])
         await self._cancel()
         self._moving_until = time.monotonic() + seconds + 0.5
         self._task = asyncio.create_task(self._run(MOVES[direction], seconds, duty, soft), name="motor")
@@ -232,6 +235,55 @@ class Motors:
             if self.on_obstacle:
                 self.on_obstacle(d)
         finally:
+            self._steer = 0.0
+            self.halt()
+
+    @property
+    def driving(self) -> bool:
+        return bool(self._task and not self._task.done() and self._task.get_name() == "drive")
+
+    async def drive(self, forward: int, duty: float, steer: float, hold_s: float) -> bool:
+        """Surekli surus (kisi takibi): ileri (1) ya da geri (-1), steer ile egri cizerek.
+
+        Durmadan guncellenir: surus suruyorsa yalniz guc/yon/bitis degisir, motor yeniden kalkmaz.
+        hold_s icinde yeni komut gelmezse kendiliginden durur (takip donmazsa robot kacmasin).
+        Onde engel varken ileri gitmez (False).
+        """
+        dirs = MOVES["ileri"] if forward > 0 else MOVES["geri"]
+        if forward > 0 and self.ahead() is not None:
+            if self.driving and self._drive_cmd[0] == dirs:
+                await self.stop(quiet=True)
+            return False
+        duty = max(self._cfg["min_speed"], min(duty * self._derate_k, self._cfg["max_speed"]))
+        until = time.monotonic() + hold_s
+        self._drive_cmd = [dirs, duty, steer, until]
+        self._moving_until = until + 0.1
+        if not self.driving:
+            await self._cancel()
+            self._task = asyncio.create_task(self._drive_loop(), name="drive")
+        return True
+
+    async def _drive_loop(self) -> None:
+        c = self._cfg
+        prev = None
+        try:
+            while self._drive_cmd and time.monotonic() < self._drive_cmd[3]:
+                dirs, duty, steer, _ = self._drive_cmd
+                if prev is not None and dirs != prev:
+                    # ileri <-> geri: once dur, disliler icin kisa bekle
+                    self._steer = 0.0
+                    self._set(0, 0, 0)
+                    await asyncio.sleep(c["reverse_pause_ms"] / 1000)
+                prev = self._prev_dir = dirs
+                self._check(dirs)
+                self._steer = steer
+                self._set(*dirs, duty)
+                await asyncio.sleep(0.02)
+        except Obstacle:
+            log.info("takipte onde engel (%s cm): durdu", "?" if self.sonar.distance is None
+                     else f"{self.sonar.distance:.0f}")
+        finally:
+            self._drive_cmd = None
             self._steer = 0.0
             self.halt()
 
