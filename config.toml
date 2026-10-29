@@ -173,20 +173,25 @@ threshold = 0.25
 target_threshold = 0.3
 # Hedef kadraj ortasina bu kadar yakinsa (genisligin orani) donulmez
 center_tolerance = 0.08
-# Kameranin yatay gorus acisi (OV5647 ~54 derece): sapma -> donulecek aci
-hfov_deg = 54
+# Kameranin yatay gorus acisi: MPU6050 ile olculdu (kirmizi kutu kaymasi / jiroskop, 14 olcum
+# 50.8-55.3, ortanca 52.7 derece; 2026-10-29)
+hfov_deg = 53
 # Yerde olculdu (MX1508, 2S, 2026-10-27): [guc %, 0.25 sn rampasiz darbede donus derecesi]
 # %24'te 3, %40'ta 14 derece; takipte hiz duzeyi ve "yavas" uygulanmaz
 # Takip hep %40 ile doner, aci darbe suresiyle ayarlanir: %24-32'de disli motorlar esit donmuyor,
 # neredeyse durdugu oldu (olcum: [24, 3], [28, 5.5], [32, 8], [36, 11], [40, 14])
-turn_table = [[40, 14]]
+# MPU6050 ile olculdu (2026-10-29, ayni zemin): 0.25 sn darbe %36 6, %40 9.2, %45 11, %50 13.4
+# derece; tepe hiz %36 ~60, %40 ~67, %45 ~80, %50 ~94 derece/sn. Sol ve sag esit.
+turn_table = [[40, 9.2]]
+# Ilk 0.25 snden sonra %40 donus bu hizla surer (0.25 -> 0.4 sn: 9.2 -> 17.1 derece)
+turn_rate_dps = 53
 # Kucuk aci icin en kisa darbe (sn)
 pulse_min = 0.15
 # Robot durduktan bu kadar sonraki kareye bakilir (titreme/bulanma gecsin)
 settle_s = 0.1
-# %40'ta donus hizi (derece/sn, turn_table'dan: 14 derece / 0.25 sn): donerken goruldugunde hedefin
+# %40'ta donus hizi (derece/sn, MPU6050 ile olculen tepe hiz): donerken goruldugunde hedefin
 # su anki yeri bununla tahmin edilir. Kare ile tanima arasi ~0.25 sn; kamera karesi ~frame_lag_s eski
-track_rate_dps = 56
+track_rate_dps = 66
 frame_lag_s = 0.05
 # Buyuk sapmada %40 ile darbe uzar, en fazla bu kadar
 pulse_max = 0.6
