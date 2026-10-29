@@ -177,6 +177,12 @@ def route(text: str) -> tuple[str, dict]:
             return "look", {"find": "person", "color": None, "me": True}
         return "look", {"find": obj, "color": color}
 
+    # --- distance sensor (HC-SR04): the LLM does not know it ---
+    if re.search(r"\bhow (far|close|near) (away )?(is|are|am) (the |that |this |it |i |you |we )?(obstacle|wall|door|object|thing|box|it|that|this|something|from|away)\b"
+                 r"|\bhow (far|close) (away )?(is|are) (the )?(nearest|closest)\b|\b(distance|obstacle)\b.*\b(front|ahead)\b"
+                 r"|\b(measure|check|what('s| is)) (the |your )?distance\b|\bany(thing| obstacle)s? (in front|ahead)\b", t):
+        return "distance", {}
+
     # --- following and turning to things ---
     # "Find and follow the TV", "Look for the ball and track it": the thing is before or after the verb
     # "on the left", "to your right", "left side": the robot's own side; the search starts there

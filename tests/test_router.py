@@ -77,6 +77,11 @@ CASES = [
     ("Tell me the capital city of Finland.", "chat", {}), ("Tell me a joke.", "chat", {}),
     ("Why is the sky blue?", "chat", {}), ("What is your name?", "chat", {}), ("Turn off the lights.", "chat", {}),
     ("I am happy today.", "chat", {}), ("The right answer is four.", "chat", {}),
+    ("How far is the obstacle?", "distance", {}), ("How far is the wall?", "distance", {}),
+    ("How close is the box?", "distance", {}), ("What's the distance in front of you?", "distance", {}),
+    ("Measure the distance.", "distance", {}), ("Is there anything in front of you?", "distance", {}),
+    ("How far away is it?", "distance", {}), ("How far is Istanbul from Ankara?", "chat", {}),
+    ("What do you see in front of you?", "look", {}),
 ]
 
 bad = 0

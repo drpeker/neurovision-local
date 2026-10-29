@@ -232,6 +232,17 @@ lock_hold_s = 6
 timeout_s = 60
 max_timeout_s = 300
 
+[sonar]
+# HC-SR04 (nv/sonar.py): TRIG GPIO4 (pin 7), ECHO GPIO17 (pin 11) 1k/2k boluculu, 5V/GND.
+# Ileri giderken onde stop_cm'den yakin engel varsa durur; engel varken ileri gitmez.
+enabled = true
+trig = 4
+echo = 17
+stop_cm = 25
+max_cm = 400
+# Olcumler arasi bekleme (sn): onceki darbenin yankilari sonsun; ~14 olcum/sn
+interval_s = 0.04
+
 [imu]
 # MPU6050 (I2C-1, 0x68): robotun yonu ve aciyla donus (nv/imu.py)
 enabled = true
@@ -289,7 +300,8 @@ i2c_buses = [1]
 8 = "ekran CS (SPI CE0)"
 6 = "ekran arka ışık"
 7 = "dokunmatik CS (planlı)"
-17 = "dokunmatik IRQ (planlı)"
+17 = "sonar ECHO (HC-SR04, bölücülü)"
+4 = "sonar TRIG (HC-SR04)"
 
 [debug]
 # Modele giden son konusmalarin sesi ve oturum talimati; bir hatayi yeniden oynatmak icin

@@ -116,6 +116,7 @@ async def run(cfg: dict) -> None:
         face = await make_face(cfg, speaker, brain)
         motors = make_motors(cfg, brain, memory)
         imu = await make_imu(cfg, motors, brain)
+        sonar = make_sonar(cfg, motors, brain)
         tracker = make_vision(cfg, camera, motors, brain, face)
         # Commands need only Whisper (~12 s); Qwen takes ~36 s to load from the SD card and is
         # only needed for chat, so the robot starts listening without waiting for it
@@ -146,6 +147,8 @@ async def run(cfg: dict) -> None:
                 motors.close()  # motors first: always stop
             if imu:
                 imu.stop()
+            if sonar:
+                sonar.stop()
             if face:
                 await face.stop()
     finally:
@@ -217,6 +220,29 @@ async def make_imu(cfg: dict, motors, brain):
     motors.imu = imu
     brain.attach_turner(AngleTurner(imu, motors, cfg["imu"]))
     return imu
+
+
+def make_sonar(cfg: dict, motors, brain):
+    """HC-SR04: driving forward stops in front of an obstacle; "how far is it?" is answered."""
+    c = cfg.get("sonar", {})
+    if not (c.get("enabled") and motors):
+        return None
+    from nv.sonar import Sonar
+    try:
+        sonar = Sonar(c)
+    except Exception as e:
+        log.warning("distance sensor did not open, driving without it: %s", e)
+        return None
+    sonar.start()
+    motors.sonar, motors.stop_cm = sonar, c["stop_cm"]
+
+    def on_obstacle(cm) -> None:
+        brain.say("Something is in front of me. I stopped." if cm is None
+                  else f"Something is {cm:.0f} centimeters in front of me. I stopped.")
+
+    motors.on_obstacle = on_obstacle
+    log.info("distance sensor ready: TRIG GPIO%d, ECHO GPIO%d, stops under %d cm", c["trig"], c["echo"], c["stop_cm"])
+    return sonar
 
 
 async def make_face(cfg: dict, speaker: Speaker, brain):

@@ -123,7 +123,20 @@ class Actions:
             self._turn_task = asyncio.create_task(self.turner.turn(sign * degrees), name="turn")
             return DIRECTIONS[direction]
         result = await self.motors.move(direction, max(0.25, min(3.0, seconds)), speed)
+        if result.get("error") == "engel":
+            return f"Something is {result['cm']:.0f} centimeters in front of me. I can't go forward."
         return DIRECTIONS[direction] if "error" not in result else "I can't move that way."
+
+    async def _distance(self) -> str:
+        sonar = self.motors.sonar if self.motors else None
+        if not sonar:
+            return "My distance sensor is not connected."
+        d = sonar.distance
+        if d is None:
+            return f"There is nothing in front of me within {sonar.max_cm / 100:.0f} meters."
+        if d >= 100:
+            return f"The nearest thing in front of me is {d / 100:.1f} meters away."
+        return f"The nearest thing in front of me is {d:.0f} centimeters away."
 
     async def _track(self, target: str | None, color: str | None = None, side: str | None = None) -> str:
         if not self.tracker:

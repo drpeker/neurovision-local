@@ -9,6 +9,7 @@ L298N'de yon IN'lerde, PWM EN'de. Tum hizlar hiz duzeyiyle (%, sesle ayarlanir) 
   stop komutu, baglanti kopmasi ve cikista ise ANINDA durur
 - sicak ya da dusuk voltajda hiz dusurulur
 - motor calisirken (ve durduktan sonra mute_tail_ms) mikrofon susar: motor sesi modele gitmez
+- ileri giderken sonar onde stop_cm'den yakin engel gorurse ANINDA durur; engel varken ileri gitmez
 """
 
 import asyncio
@@ -23,6 +24,10 @@ log = logging.getLogger(__name__)
 MOVES = {"ileri": (1, 1), "geri": (-1, -1), "sol": (-1, 1), "sag": (1, -1)}
 SPEEDS = {"çok yavaş": 0.6, "yavaş": 0.8, "normal": 1.0, "hızlı": 1.25}
 RAMP_STEP_S = 0.025  # rampada guc guncelleme araligi
+
+
+class Obstacle(Exception):
+    """Ileri giderken onde engel: hareket aninda kesilir."""
 
 
 class Motors:
@@ -45,6 +50,9 @@ class Motors:
         self._quiet_until = 0.0
         self.imu = None  # robot.py: nv.imu.Imu varsa duz gidiste yon korunur
         self._steer = 0.0  # duz gidiste yon duzeltmesi: sol guc x (1+steer), sag x (1-steer)
+        self.sonar = None  # robot.py: nv.sonar.Sonar varsa ileri giderken engelde durur
+        self.stop_cm = 25.0
+        self.on_obstacle = None  # robot.py: on_obstacle(cm), engel yuzunden durunca (soylemek icin)
         log.info("motorlar hazir: %s, hiz duzeyi %%%d (sol A, sag B%s)", cfg["driver"],
                  self.speed_level, " ters" if cfg["right"]["invert"] else "")
 
@@ -133,6 +141,15 @@ class Motors:
         self._quiet_until = self._stopped_at + self._cfg["mute_tail_ms"] / 1000
 
     # --- hiz siniri ---
+    def ahead(self) -> float | None:
+        """Ondeki engel stop_cm'den yakinsa mesafesi (cm), degilse None."""
+        d = self.sonar.distance if self.sonar else None
+        return d if d is not None and d < self.stop_cm else None
+
+    def _check(self, dirs: tuple[int, int]) -> None:
+        if dirs == MOVES["ileri"] and self.ahead() is not None:
+            raise Obstacle()
+
     def _derate(self) -> float:
         """Sicaklik ya da dusuk voltaj varsa hizi dusur."""
         try:
@@ -167,6 +184,9 @@ class Motors:
         if direction not in MOVES:
             return {"error": f"bilinmeyen yön: {direction}"}
         c = self._cfg
+        if direction == "ileri" and (d := self.ahead()) is not None:
+            log.info("ileri gidilmedi: onde engel %.0f cm", d)
+            return {"error": "engel", "cm": d}
         # Cok kisa hareket rampada kaybolur, palet yerde kalkmaz: en az min_seconds
         seconds = max(c["min_seconds"], min(float(seconds), c["max_seconds"]))
         # Sesli donus (duty verilmez; takip ve arama kendi duty degerini verir): yerinde donmek
@@ -203,8 +223,14 @@ class Motors:
             if heading is not None and dirs[0] == dirs[1]:
                 await self._hold_heading(dirs, duty, heading, seconds - up - down)
             else:
-                await asyncio.sleep(seconds - up - down)
+                await self._wait(dirs, seconds - up - down)
             await self._ramp(dirs, duty, start, down)
+        except Obstacle:
+            d = self.sonar.distance if self.sonar else None
+            self.halt()  # rampasiz, hemen
+            log.info("onde engel (%s cm): durdu", "?" if d is None else f"{d:.0f}")
+            if self.on_obstacle:
+                self.on_obstacle(d)
         finally:
             self._steer = 0.0
             self.halt()
@@ -214,6 +240,7 @@ class Motors:
         c = self._cfg
         end = time.monotonic() + seconds
         while time.monotonic() < end:
+            self._check(dirs)
             drift = self.imu.heading - heading  # sola pozitif
             steer = max(-c["steer_max"], min(c["steer_max"], c["steer_per_deg"] * drift))
             self._steer = steer if dirs[0] > 0 else -steer
@@ -224,8 +251,15 @@ class Motors:
         step = RAMP_STEP_S
         n = max(1, int(seconds / step))
         for i in range(1, n + 1):
+            self._check(dirs)
             self._set(*dirs, start + (end - start) * i / n)
             await asyncio.sleep(step)
+
+    async def _wait(self, dirs: tuple[int, int], seconds: float) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            self._check(dirs)
+            await asyncio.sleep(min(0.02, max(0.0, end - time.monotonic())))
 
     async def signal_check(self) -> dict:
         """Takilma teshisi: kisa bir darbe ver, PWM pinlerde gercekten var mi olc.
